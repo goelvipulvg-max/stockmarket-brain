@@ -30,10 +30,11 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ── RSS Feeds ──────────────────────────────────────────────────────────────────
 RSS_FEEDS = {
-    "ET Markets":         "https://economictimes.indiatimes.com/markets/rss.cms",
-    "Moneycontrol":       "https://www.moneycontrol.com/rss/marketsnews.xml",
+    "ET Markets":         "https://economictimes.indiatimes.com/rssfeedsdefault.cms",
+    "Moneycontrol":       "https://www.moneycontrol.com/rss/latestnews.xml",
     "LiveMint":           "https://www.livemint.com/rss/markets",
-    "Business Standard":  "https://www.business-standard.com/rss/markets-106.rss",
+    "NDTV Profit":          "https://feeds.feedburner.com/ndtvprofit-latest",
+    "Investing.com":        "https://in.investing.com/rss/news.rss",
     "Hindu BusinessLine": "https://www.thehindubusinessline.com/markets/?service=rss",
 }
 
