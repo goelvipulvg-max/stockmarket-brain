@@ -10,3 +10,8 @@ pinecone>=5.1.0
 google-auth>=2.0.0
 google-api-python-client>=2.0.0
 openpyxl>=3.1.0
+
+# Tier-2 signals dependencies
+yfinance>=0.2.40
+pandas-ta>=0.3.14b0
+curl-cffi>=0.6.0
