@@ -1,3 +1,15 @@
 ﻿# Claude Context for stockmarket-brain repo
 
-Will be filled in next step.
+This repo contains all code for the StockMarket-Brain personal trading intelligence system.
+
+## Architecture
+- 5-tier AI agent hierarchy (Tier-0 to Tier-4)
+- Hybrid strategy (LT 50% + ST 50%)
+- Capital: Rs 5L total (Rs 2.5L LT + Rs 2.5L ST)
+
+## Key folders
+- agents/ - One Python file per tier
+- prompts/ - System prompts as text files
+- utils/ - Shared clients (Upstox, Telegram, Supabase, Pinecone)
+- data/ - Reference data (trade history, ticker maps)
+- scripts/ - Setup and test scripts

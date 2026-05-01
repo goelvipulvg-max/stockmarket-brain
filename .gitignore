@@ -6,7 +6,6 @@
 # Python
 __pycache__/
 *.py[cod]
-*.so
 .Python
 *.egg-info/
 .pytest_cache/
@@ -22,6 +21,6 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Local data (use stockmarket-data repo instead)
+# Local data
 local-data/
 *.log
