@@ -1,0 +1,30 @@
+name: Tier-1 News Researcher
+
+on:
+  schedule:
+    - cron: '0,30 3-10 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-tier1-news:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic supabase feedparser requests python-dotenv
+
+      - name: Run Tier-1 News Agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_MOVERS_CHANNEL: ${{ secrets.TELEGRAM_MOVERS_CHANNEL }}
+        run: python agents/tier1_news.py
