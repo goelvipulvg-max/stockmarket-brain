@@ -80,7 +80,7 @@ def classify(headline: str, snippet: str) -> dict:
         snippet=snippet[:400] if snippet else "N/A"
     )
     msg = client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5-20251001",
         max_tokens=300,
         system="You must respond with ONLY a valid JSON object. No preamble, no markdown, no code fences. Just raw JSON.",
         messages=[{"role": "user", "content": prompt}],
