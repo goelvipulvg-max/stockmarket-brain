@@ -28,12 +28,12 @@ jobs:
     steps:
       # Step 1: Checkout repo code
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Step 2: Setup Python 3.12 (matches local dev environment)
       # Built-in pip cache speeds up subsequent runs by ~1-2 min
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: "pip"

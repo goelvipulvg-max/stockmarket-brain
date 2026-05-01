@@ -102,8 +102,9 @@ Respond ONLY in this JSON format:
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    temperature=0,
+    messages=[{"role": "user", "content": prompt}]
+)
     raw = response.content[0].text.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(raw)
 
@@ -113,7 +114,8 @@ def send_telegram(message):
         print("  Telegram config missing — skipping")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_SWING_CHANNEL, "text": message, "parse_mode": "HTML"})
+    r = requests.post(url, json={"chat_id": TELEGRAM_SWING_CHANNEL, "text": message, "parse_mode": "HTML"}, timeout=10)
+    r.raise_for_status()
 
 def format_message(data, signal):
     emoji = "🟢" if signal["signal"] == "BUY" else "🔴" if signal["signal"] == "SELL" else "🟡"
@@ -148,4 +150,11 @@ def main():
     print(f"\nDone. Posted: {posted} signals")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"\n❌ FATAL: Tier-2 Signal Agent crashed — {type(e).__name__}: {e}")
+        sys.exit(1)
