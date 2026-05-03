@@ -124,9 +124,8 @@ def send_telegram(message):
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     r = requests.post(url, json={"chat_id": TELEGRAM_SWING_CHANNEL, "text": message, "parse_mode": "HTML"}, timeout=10)
-   r.raise_for_status()
+    r.raise_for_status()
 
-# --- Step 4: Paper Trade Logging ---
 def log_paper_trade(data, signal):
     """Insert all BUY/SELL signals into Supabase paper_trades for analysis."""
     if not supabase:
@@ -150,9 +149,9 @@ def log_paper_trade(data, signal):
         print(f"  -> Paper trade logged")
     except Exception as e:
         if "duplicate" in str(e).lower() or "23505" in str(e):
-            print(f"  -> Paper trade already exists for today (idempotent skip)")
+            print(f"  -> Already exists today, skipping")
         else:
-            print(f"  -> Paper trade log failed: {type(e).__name__}: {e}")
+            print(f"  -> Log failed: {type(e).__name__}: {e}")
 
 def format_message(data, signal):
     emoji = "🟢" if signal["signal"] == "BUY" else "🔴" if signal["signal"] == "SELL" else "🟡"
@@ -175,8 +174,6 @@ def main():
                 continue
             signal = get_signal(data)
             print(f"{ticker}: {signal['signal']} | Confidence: {signal['confidence']}")
-
-            # P4: Log all non-HOLD signals to paper_trades (no confidence filter)
             if signal["signal"] != "HOLD":
                 log_paper_trade(data, signal)
 
