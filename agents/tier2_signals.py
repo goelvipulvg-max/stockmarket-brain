@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
+from supabase import create_client, Client
 
 # --- Session ---
 _session = curl_requests.Session(impersonate="chrome124")
@@ -18,6 +19,14 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_SWING_CHANNEL = os.getenv("TELEGRAM_SWING_CHANNEL", "").strip()
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 SCORE_THRESHOLD = 7
+
+# --- Supabase config ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+supabase: Client | None = (
+    create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY else None
+)
 
 WATCHLIST = [
     "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
@@ -115,7 +124,35 @@ def send_telegram(message):
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     r = requests.post(url, json={"chat_id": TELEGRAM_SWING_CHANNEL, "text": message, "parse_mode": "HTML"}, timeout=10)
-    r.raise_for_status()
+   r.raise_for_status()
+
+# --- Step 4: Paper Trade Logging ---
+def log_paper_trade(data, signal):
+    """Insert all BUY/SELL signals into Supabase paper_trades for analysis."""
+    if not supabase:
+        print("  Supabase config missing - skipping paper trade log")
+        return
+    try:
+        supabase.table("paper_trades").insert({
+            "ticker": data["ticker"],
+            "direction": signal["signal"],
+            "confidence": signal["confidence"],
+            "reason": signal["reason"],
+            "entry_price": signal["entry"],
+            "target_price": signal["target"],
+            "stop_loss": signal["stop_loss"],
+            "rsi": data["rsi"],
+            "macd": data["macd"],
+            "support": data["support"],
+            "resistance": data["resistance"],
+            "raw_signal": signal,
+        }).execute()
+        print(f"  -> Paper trade logged")
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "23505" in str(e):
+            print(f"  -> Paper trade already exists for today (idempotent skip)")
+        else:
+            print(f"  -> Paper trade log failed: {type(e).__name__}: {e}")
 
 def format_message(data, signal):
     emoji = "🟢" if signal["signal"] == "BUY" else "🔴" if signal["signal"] == "SELL" else "🟡"
@@ -138,6 +175,11 @@ def main():
                 continue
             signal = get_signal(data)
             print(f"{ticker}: {signal['signal']} | Confidence: {signal['confidence']}")
+
+            # P4: Log all non-HOLD signals to paper_trades (no confidence filter)
+            if signal["signal"] != "HOLD":
+                log_paper_trade(data, signal)
+
             if signal["confidence"] >= SCORE_THRESHOLD and signal["signal"] != "HOLD":
                 msg = format_message(data, signal)
                 send_telegram(msg)
