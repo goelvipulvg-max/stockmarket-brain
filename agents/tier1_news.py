@@ -2,7 +2,10 @@
 # Tier-1 News Researcher — StockMarket-Brain
 # Scrapes 5 financial news sites via RSS → Haiku classify → Score 6+ → Telegram MOVERS
 
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 import hashlib
 import feedparser
@@ -11,6 +14,7 @@ from datetime import datetime, timezone
 from anthropic import Anthropic
 from supabase import create_client
 from dotenv import load_dotenv
+import utils.questdb_client as questdb_client
 
 load_dotenv()
 import re
@@ -47,7 +51,7 @@ def is_duplicate(url: str) -> bool:
     result = supabase.table("news_log").select("id").eq("url_hash", h).execute()
     return len(result.data) > 0
 
-def log_article(source, url, title, score, category, summary):
+def log_article(source, url, title, score, category, summary, ts):
     supabase.table("news_log").insert({
         "source":     source,
         "url":        url,
@@ -58,6 +62,33 @@ def log_article(source, url, title, score, category, summary):
         "summary":    summary,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
+    log_news_questdb(ts, source, url, title, score, category, summary)
+
+
+def log_news_questdb(ts, source, url, title, score, category, summary):
+    # symbol="MARKET" is a placeholder — no per-article ticker extraction today.
+    # Future symbol extraction will require a backfill decision for historical rows.
+    try:
+        sql = (
+            "INSERT INTO news_events "
+            "(ts, event_id, source, symbol, headline, url, sentiment, category, summary) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        )
+        row = (
+            ts,
+            url_hash(url),
+            source,
+            "MARKET",
+            title,
+            url,
+            float(score),
+            category,
+            summary or "",
+        )
+        questdb_client.executemany(sql, [row])
+        print(f"  -> QuestDB news_event logged")
+    except Exception as e:
+        print(f"  -> QuestDB write failed (non-fatal): {type(e).__name__}: {e}")
 
 # ── Haiku Classifier ───────────────────────────────────────────────────────────
 CLASSIFY_PROMPT = """You are a stock market analyst. Rate this news headline's market impact.
@@ -144,6 +175,17 @@ def run():
             title   = entry.get("title", "").strip()
             snippet = entry.get("summary", "")
 
+            pub = entry.get("published_parsed")
+            if pub:
+                entry_ts = datetime(*pub[:6])   # already naive UTC — feedparser normalizes
+            else:
+                # pubDate absent from feed — fall back to midnight UTC ingestion ts.
+                # NOTE: intraday granularity lost for this article; future backtesting
+                # will see it as 00:00:00 UTC on the ingestion day.
+                entry_ts = datetime.now(timezone.utc).replace(
+                    hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+                )
+
             if not url or not title:
                 continue
 
@@ -164,7 +206,7 @@ def run():
                 continue
 
             try:
-                log_article(source, url, title, score, category, summary)
+                log_article(source, url, title, score, category, summary, entry_ts)
             except Exception as e:
                 print(f"   ⚠️  Supabase error: {e}")
 
