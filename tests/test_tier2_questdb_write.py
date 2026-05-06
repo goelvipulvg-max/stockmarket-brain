@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 from unittest.mock import patch
 from datetime import datetime, timezone
 
@@ -96,3 +97,27 @@ def test_questdb_failure_does_not_raise():
     """QuestDB write failure must be non-fatal — must not propagate to caller."""
     with patch("utils.questdb_client.executemany", side_effect=Exception("connection refused")):
         log_signal_questdb(SAMPLE_DATA, SAMPLE_BUY_SIGNAL)  # must not raise
+
+
+def test_script_importable_when_run_directly():
+    """python agents/tier2_signals.py must not crash with ModuleNotFoundError (simulates CI)."""
+    project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+    result = subprocess.run(
+        [sys.executable, "agents/tier2_signals.py"],
+        capture_output=True,
+        text=True,
+        cwd=project_root,
+        env={
+            **{k: os.environ[k] for k in ("PATH",) if k in os.environ},
+            **{k: os.environ[k] for k in ("SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP") if k in os.environ},
+            "SUPABASE_URL": "",
+            "SUPABASE_SERVICE_ROLE_KEY": "",
+            "ANTHROPIC_API_KEY": "test-key",
+            "TELEGRAM_BOT_TOKEN": "",
+            "TELEGRAM_SWING_CHANNEL": "",
+        },
+    )
+    assert "No module named 'utils'" not in result.stderr, (
+        f"sys.path bug: script crashed with ModuleNotFoundError — fix not yet applied.\n"
+        f"stderr:\n{result.stderr[:500]}"
+    )
