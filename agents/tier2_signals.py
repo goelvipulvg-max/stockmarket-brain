@@ -11,7 +11,7 @@ load_dotenv(override=True)
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-from utils import questdb_client
+from utils.questdb_client import executemany
 
 # --- Session ---
 _session = curl_requests.Session(impersonate="chrome124")
@@ -183,7 +183,7 @@ def log_signal_questdb(data, signal):
             False,
             "",
         )
-        questdb_client.executemany(sql, [row])
+        executemany(sql, [row])
         print("  -> QuestDB signal logged")
     except Exception as e:
         print(f"  -> QuestDB write failed (non-fatal): {type(e).__name__}: {e}")
