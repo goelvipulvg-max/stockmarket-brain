@@ -157,7 +157,8 @@ def log_paper_trade(data, signal):
 def log_signal_questdb(data, signal):
     try:
         now_utc = datetime.now(timezone.utc)
-        ts = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        # QuestDB wire protocol rejects timestamptz — send naive UTC midnight
+        ts = now_utc.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         signal_id = f"{data['ticker']}_{now_utc.strftime('%Y%m%d')}"
         sql = (
             "INSERT INTO signals "

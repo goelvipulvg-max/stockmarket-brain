@@ -67,7 +67,7 @@ def test_ts_is_midnight_utc():
         assert ts.minute == 0
         assert ts.second == 0
         assert ts.microsecond == 0
-        assert ts.tzinfo is not None
+        assert ts.tzinfo is None  # QuestDB wire rejects timestamptz — must be naive UTC
 
 
 def test_signal_id_contains_ticker_and_date():
