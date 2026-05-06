@@ -14,7 +14,13 @@ from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 # Import questdb_client module
 import importlib.util
-spec = importlib.util.spec_from_file_location("questdb_client", os.path.join(project_root, "utils", "questdb_client.py"))
+qdb_path = os.path.join(project_root, "utils", "questdb_client.py")
+print(f"DEBUG: Loading questdb_client from {qdb_path}", file=sys.stderr)
+print(f"DEBUG: File exists: {os.path.exists(qdb_path)}", file=sys.stderr)
+if os.path.exists(project_root):
+    print(f"DEBUG: Project root exists: {project_root}", file=sys.stderr)
+    print(f"DEBUG: Contents of utils dir: {os.listdir(os.path.join(project_root, 'utils')) if os.path.exists(os.path.join(project_root, 'utils')) else 'utils dir not found'}", file=sys.stderr)
+spec = importlib.util.spec_from_file_location("questdb_client", qdb_path)
 questdb_client = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(questdb_client)
 executemany = questdb_client.executemany
