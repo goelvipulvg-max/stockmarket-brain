@@ -1,6 +1,7 @@
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 import json
 import pandas as pd
 import pandas_ta as ta
@@ -11,7 +12,12 @@ load_dotenv(override=True)
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-from utils.questdb_client import executemany
+# Import questdb_client module
+import importlib.util
+spec = importlib.util.spec_from_file_location("questdb_client", os.path.join(project_root, "utils", "questdb_client.py"))
+questdb_client = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(questdb_client)
+executemany = questdb_client.executemany
 
 # --- Session ---
 _session = curl_requests.Session(impersonate="chrome124")
