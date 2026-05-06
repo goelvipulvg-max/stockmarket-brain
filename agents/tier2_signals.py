@@ -5,10 +5,11 @@ import pandas_ta as ta
 import requests
 from anthropic import Anthropic
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 from curl_cffi import requests as curl_requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
+from utils import questdb_client
 
 # --- Session ---
 _session = curl_requests.Session(impersonate="chrome124")
@@ -153,6 +154,38 @@ def log_paper_trade(data, signal):
         else:
             print(f"  -> Log failed: {type(e).__name__}: {e}")
 
+def log_signal_questdb(data, signal):
+    try:
+        now_utc = datetime.now(timezone.utc)
+        ts = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        signal_id = f"{data['ticker']}_{now_utc.strftime('%Y%m%d')}"
+        sql = (
+            "INSERT INTO signals "
+            "(ts, signal_id, symbol, strategy, direction, confidence, "
+            "entry_target, stop_loss, take_profit, reasoning, source, triggered, trade_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        )
+        row = (
+            ts,
+            signal_id,
+            data["ticker"],
+            "tier2-swing",
+            signal["signal"],
+            float(signal["confidence"]),
+            signal["entry"],
+            signal["stop_loss"],
+            signal["target"],
+            signal["reason"],
+            "claude-haiku",
+            False,
+            "",
+        )
+        questdb_client.executemany(sql, [row])
+        print("  -> QuestDB signal logged")
+    except Exception as e:
+        print(f"  -> QuestDB write failed (non-fatal): {type(e).__name__}: {e}")
+
+
 def format_message(data, signal):
     emoji = "🟢" if signal["signal"] == "BUY" else "🔴" if signal["signal"] == "SELL" else "🟡"
     return f"""{emoji} <b>{data['ticker']}</b> — {signal['signal']}
@@ -176,12 +209,13 @@ def main():
             print(f"{ticker}: {signal['signal']} | Confidence: {signal['confidence']}")
             if signal["signal"] != "HOLD":
                 log_paper_trade(data, signal)
+                log_signal_questdb(data, signal)
 
             if signal["confidence"] >= SCORE_THRESHOLD and signal["signal"] != "HOLD":
                 msg = format_message(data, signal)
                 send_telegram(msg)
                 posted += 1
-                print(f"  → Posted ✅")
+                print(f"  -> Posted [OK]")
         except Exception as e:
             import traceback
             traceback.print_exc()
