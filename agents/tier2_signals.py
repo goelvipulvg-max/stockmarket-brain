@@ -1,7 +1,6 @@
 import os
 import sys
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import pandas as pd
 import pandas_ta as ta
@@ -12,13 +11,7 @@ load_dotenv(override=True)
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-# Import questdb_client module
-import importlib.util
-qdb_path = os.path.join(project_root, "utils", "questdb_client.py")
-spec = importlib.util.spec_from_file_location("questdb_client", qdb_path)
-questdb_client = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(questdb_client)
-executemany = questdb_client.executemany
+from utils import questdb_client
 
 # --- Session ---
 _session = curl_requests.Session(impersonate="chrome124")
@@ -190,7 +183,7 @@ def log_signal_questdb(data, signal):
             False,
             "",
         )
-        executemany(sql, [row])
+        questdb_client.executemany(sql, [row])
         print("  -> QuestDB signal logged")
     except Exception as e:
         print(f"  -> QuestDB write failed (non-fatal): {type(e).__name__}: {e}")
