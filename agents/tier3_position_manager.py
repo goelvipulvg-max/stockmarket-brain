@@ -34,7 +34,7 @@ def apply_rules(signal: dict, open_trades: list) -> tuple:
     return True, None
 
 
-def evaluate_with_claude(signal: dict, filings: list, news: list, client) -> dict:
+def evaluate_with_claude(signal: dict, filings: list, news: list, client, memory_text: str = "No resolved trades yet.") -> dict:
     ticker_base = signal["ticker"].replace(".NS", "")
 
     filings_text = "\n".join(
@@ -62,6 +62,9 @@ Recent filings for {ticker_base} (last 3):
 
 Recent market news (general, last 5):
 {news_text}
+
+Historical trading performance:
+{memory_text}
 
 Respond ONLY in this JSON format:
 {{"verdict": "APPROVE" or "REJECT", "confidence": <int 1-10>, "reason": "<one line>"}}
@@ -164,6 +167,17 @@ def main():
         .data
     )
 
+    memory_row = (
+        supabase.table("trade_memory")
+        .select("memory_text")
+        .order("computed_date", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    memory_text = memory_row[0]["memory_text"] if memory_row else "No resolved trades yet."
+    print(f"Trade memory loaded: {len(memory_text)} chars")
+
     approved = []
     rejected_reasons = []
 
@@ -199,7 +213,7 @@ def main():
             .data
         )
 
-        result = evaluate_with_claude(signal, filings, news, anthropic_client)
+        result = evaluate_with_claude(signal, filings, news, anthropic_client, memory_text=memory_text)
         verdict = result["verdict"]
         tier3_confidence = result["confidence"]
         tier3_reason = result["reason"]
