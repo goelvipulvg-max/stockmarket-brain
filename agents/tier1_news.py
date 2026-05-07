@@ -9,10 +9,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import hashlib
 import feedparser
-import requests
 from datetime import datetime, timezone
 from anthropic import Anthropic
-from supabase import create_client
+from utils.supabase_client import get_client
+from utils.telegram_client import send_message
 from dotenv import load_dotenv
 import utils.questdb_client as questdb_client
 
@@ -22,15 +22,13 @@ for k, v in os.environ.items():
     os.environ[k] = v.strip()
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-SUPABASE_URL          = os.getenv("SUPABASE_URL")
-SUPABASE_KEY          = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 TELEGRAM_BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_MOVERS_CHAT  = os.getenv("TELEGRAM_MOVERS_CHANNEL")  # e.g. -100xxxxxxxxxx
 SCORE_THRESHOLD       = 6
 
 # ── Clients ────────────────────────────────────────────────────────────────────
 client   = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = get_client()
 
 # ── RSS Feeds ──────────────────────────────────────────────────────────────────
 RSS_FEEDS = {
@@ -140,18 +138,7 @@ def send_telegram(source, title, url, score, category, summary):
         f"📰 {source}\n"
         f"🔗 [Read More]({url})"
     )
-    r = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        json={
-            "chat_id":                  TELEGRAM_MOVERS_CHAT,
-            "text":                     text,
-            "parse_mode":               "Markdown",
-            "disable_web_page_preview": True,
-        },
-        timeout=10,
-    )
-    if not r.ok:
-        print(f"  ⚠️  Telegram error: {r.status_code} — {r.text[:100]}")
+    send_message(TELEGRAM_BOT_TOKEN, TELEGRAM_MOVERS_CHAT, text, parse_mode="Markdown")
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def run():
