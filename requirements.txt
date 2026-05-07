@@ -19,3 +19,6 @@ yfinance>=0.2.40
 pandas-ta>=0.3.14b0
 curl-cffi>=0.6.0
 supabase>=2.7.0
+
+# Phase 3 backtesting
+vectorbt>=0.26.2

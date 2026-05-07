@@ -24,3 +24,44 @@ Thumbs.db
 # Local data
 local-data/
 *.log
+
+# Python (additional)
+*$py.class
+*.so
+env/
+ENV/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Environment & secrets (additional)
+.env.local
+.env.*.local
+secrets.json
+credentials.json
+
+# IDE & OS (additional)
+*.swo
+desktop.ini
+
+# Logs & databases
+logs/
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Project-specific
+.claude-mem/
+.claude/local/
+node_modules/
+.cache/
+tmp/
+temp/
+reports/
+
+# Data files (commit only sample/seed data, not full datasets)
+data/raw/
+data/processed/
+*.parquet
+*.feather
