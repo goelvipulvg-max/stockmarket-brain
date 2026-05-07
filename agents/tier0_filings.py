@@ -1,6 +1,7 @@
-﻿import json, urllib.request, urllib.parse
+﻿import json, urllib.request
 import anthropic
-from supabase import create_client
+from utils.supabase_client import get_client
+from utils.telegram_client import send_message
 
 env = {}
 with open(".env") as f:
@@ -11,7 +12,7 @@ with open(".env") as f:
             env[k.strip()] = v.strip()
 
 ai  = anthropic.Anthropic(api_key=env["ANTHROPIC_API_KEY"])
-sb  = create_client(env["SUPABASE_URL"], env["SUPABASE_ANON_KEY"])
+sb  = get_client()
 BOT = env["TELEGRAM_BOT_TOKEN"]
 MOVERS_CHANNEL = env["TELEGRAM_MOVERS_CHANNEL"]
 
@@ -66,15 +67,6 @@ Respond ONLY in JSON (no markdown):
     text = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
     return json.loads(text)
 
-def send_telegram(chat_id, text):
-    data = urllib.parse.urlencode({
-        "chat_id": chat_id, "text": text, "parse_mode": "HTML"
-    }).encode()
-    with urllib.request.urlopen(
-        urllib.request.Request(f"https://api.telegram.org/bot{BOT}/sendMessage", data=data)
-    ) as r:
-        return json.loads(r.read())
-
 def save_to_supabase(filing, clf):
     sb.table("filings_log").insert({
         "symbol": str(filing.get("symbol","")),
@@ -122,7 +114,7 @@ def main():
                     f"📅 {filing['pubdate']}\n"
                     f"🔗 NSE Filing"
                 )
-                send_telegram(MOVERS_CHANNEL, msg)
+                send_message(BOT, MOVERS_CHANNEL, msg)
                 clf["telegram_sent"] = True
                 material_count += 1
                 print(f"     ✅ Sent to Telegram!")
