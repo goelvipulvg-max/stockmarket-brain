@@ -63,3 +63,34 @@ def test_rule_all_pass():
     passed, reason = apply_rules(signal, open_trades)
     assert passed is True
     assert reason is None
+
+
+# ── evaluate_with_claude ──────────────────────────────────────────────────────
+
+def test_claude_approve():
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value.content[0].text = (
+        '{"verdict": "APPROVE", "confidence": 9, "reason": "Strong signal, no negative catalysts"}'
+    )
+    result = evaluate_with_claude(make_signal(), [], [], mock_client)
+    assert result["verdict"] == "APPROVE"
+    assert result["confidence"] == 9
+    assert "_parse_error" not in result
+
+
+def test_claude_reject():
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value.content[0].text = (
+        '{"verdict": "REJECT", "confidence": 3, "reason": "Regulatory action pending"}'
+    )
+    result = evaluate_with_claude(make_signal(), [], [], mock_client)
+    assert result["verdict"] == "REJECT"
+    assert "_parse_error" not in result
+
+
+def test_claude_parse_error():
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value.content[0].text = "not valid json {{{"
+    result = evaluate_with_claude(make_signal(), [], [], mock_client)
+    assert result["verdict"] == "REJECT"
+    assert result.get("_parse_error") is True
