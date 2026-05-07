@@ -94,3 +94,27 @@ def test_claude_parse_error():
     result = evaluate_with_claude(make_signal(), [], [], mock_client)
     assert result["verdict"] == "REJECT"
     assert result.get("_parse_error") is True
+
+
+# ── format_pick_message ───────────────────────────────────────────────────────
+
+def test_summary_message_format():
+    approved = ["RELIANCE.NS", "TCS.NS"]
+    rejected_reasons = [
+        "confidence_below_threshold",
+        "confidence_below_threshold",
+        "duplicate_open_position",
+        "claude_reject",
+    ]
+    msg = format_summary_message(approved, rejected_reasons, "07 May 2026")
+    assert "Approved: 2" in msg
+    assert "Rejected: 4" in msg
+    assert "50,000" in msg
+    assert "2 × confidence_below_threshold" in msg
+
+
+def test_no_signals_today():
+    msg = format_summary_message([], [], "07 May 2026")
+    assert "Approved: 0" in msg
+    assert "Rejected: 0" in msg
+    assert "₹0" in msg

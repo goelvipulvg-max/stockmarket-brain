@@ -83,11 +83,33 @@ REJECT only if there is a specific negative catalyst (bad earnings, regulatory a
 
 
 def format_pick_message(signal: dict, tier3_confidence: int, tier3_reason: str) -> str:
-    raise NotImplementedError
+    direction = signal["direction"]
+    arrow = "\U0001f4c8" if direction == "BUY" else "\U0001f4c9"
+    return (
+        f'✅ <b>TIER-3 APPROVED</b> — <b>{signal["ticker"]}</b>\n\n'
+        f'{arrow} Direction: {direction}\n'
+        f'\U0001f4b0 Entry: ₹{signal["entry_price"]:.2f} | Target: ₹{signal["target_price"]:.2f} | SL: ₹{signal["stop_loss"]:.2f}\n'
+        f'\U0001f3af Tier-2 Confidence: {signal["confidence"]}/10 | Tier-3 Confidence: {tier3_confidence}/10\n'
+        f'\U0001f4b5 Position Size: ₹25,000\n\n'
+        f'\U0001f4dd Tier-2: {signal["reason"]}\n'
+        f'\U0001f50d Tier-3: {tier3_reason}'
+    )
 
 
 def format_summary_message(approved: list, rejected_reasons: list, date_str: str) -> str:
-    raise NotImplementedError
+    total_capital = len(approved) * 25000
+    reason_counts = Counter(rejected_reasons)
+    breakdown = "\n".join(
+        f"• {count} × {reason}" for reason, count in reason_counts.items()
+    )
+    msg = (
+        f'\U0001f4cb <b>Tier-3 Daily Summary — {date_str}</b>\n\n'
+        f'✅ Approved: {len(approved)}  |  ❌ Rejected: {len(rejected_reasons)}\n'
+        f'\U0001f4b0 Total capital to deploy today: ₹{total_capital:,}'
+    )
+    if breakdown:
+        msg += f'\n\nRejected breakdown:\n{breakdown}'
+    return msg
 
 
 def log_decision(supabase, decision: dict) -> None:
