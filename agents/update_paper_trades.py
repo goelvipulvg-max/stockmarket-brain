@@ -6,30 +6,28 @@ Logic:
 - Gets today's intraday HIGH and LOW from Yahoo Finance
 - Closes trades on target/SL hit using day range (not just LTP -
   this captures intraday swings between 30-min check intervals)
-- At 15:30 IST market close, force-closes remaining OPEN as EXPIRED at LTP
+- Swing window: trades stay OPEN for up to MAX_HOLDING_DAYS calendar days
+- At 15:30 IST on day >= MAX_HOLDING_DAYS, force-closes remaining OPEN as EXPIRED at LTP
 
 Backtest convention: zero slippage. Exit at exact target/SL on hit, LTP on expiry.
 """
-import os
 import sys
-from datetime import datetime, time as dt_time
+from datetime import datetime, date, time as dt_time
 from zoneinfo import ZoneInfo
-from supabase import create_client, Client
+from utils.supabase_client import get_client
 from curl_cffi import requests as curl_requests
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 IST = ZoneInfo("Asia/Kolkata")
 MARKET_CLOSE = dt_time(15, 30)
+MAX_HOLDING_DAYS = 5  # swing window: expire only after this many calendar days
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-    print("FATAL: Supabase config missing")
+try:
+    supabase = get_client()
+except ValueError as e:
+    print(f"FATAL: {e}")
     sys.exit(1)
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 _session = curl_requests.Session(impersonate="chrome124")
 
 
@@ -85,6 +83,10 @@ def main():
     closed = 0
 
     for trade in open_trades:
+        # --- Holding days (calculated from signal_date; no DB column needed) ---
+        signal_date = date.fromisoformat(trade["signal_date"])
+        holding_days = (now_ist.date() - signal_date).days
+
         market = get_market_data(trade["ticker"])
         if market is None:
             print(f"  {trade['ticker']}: skip (no data)")
@@ -99,8 +101,8 @@ def main():
             target, stop_loss
         )
 
-        # Force-close at market close if not already hit
-        if not new_status and is_market_close:
+        # Only expire at market close once the swing window has elapsed
+        if not new_status and is_market_close and holding_days >= MAX_HOLDING_DAYS:
             new_status = "EXPIRED"
 
         if new_status:
@@ -121,12 +123,14 @@ def main():
                 "pnl_pct": pnl,
             }).eq("id", trade["id"]).execute()
 
-            print(f"  {trade['ticker']}: {new_status} @ {exit_price} | PnL: {pnl}%")
+            print(f"  {trade['ticker']}: {new_status} @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
             closed += 1
         else:
-            print(f"  {trade['ticker']}: OPEN | LTP {market['ltp']} (range: {market['day_low']}-{market['day_high']})")
+            days_left = max(0, MAX_HOLDING_DAYS - holding_days)
+            print(f"  {trade['ticker']}: OPEN | LTP {market['ltp']} (range: {market['day_low']}-{market['day_high']}) | day {holding_days}/{MAX_HOLDING_DAYS}, {days_left} left")
 
-    print(f"\nDone. Closed: {closed}/{len(open_trades)}")
+    still_open = len(open_trades) - closed
+    print(f"\nDone. Closed: {closed}  |  Still OPEN: {still_open}  |  Total checked: {len(open_trades)}")
 
 
 if __name__ == "__main__":
