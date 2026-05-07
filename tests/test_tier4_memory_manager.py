@@ -94,6 +94,48 @@ def test_zero_resolved_trades():
     assert text == "No resolved trades yet."
 
 
+# ── MIN_SAMPLES threshold ─────────────────────────────────────────────────────
+
+def test_format_confidence_insufficient_data():
+    stats = {
+        "by_confidence": {8: {"wins": 1, "total": 2}},
+        "by_ticker": {},
+        "by_direction": {"BUY": {"wins": 5, "total": 8}},
+        "total_resolved": 2,
+    }
+    text = format_memory_text(stats, "2026-05-07")
+    assert "Conf 8: 2T — insufficient data" in text
+    assert "%" not in text.split("By confidence:")[1].split("By")[0]
+
+
+def test_format_direction_insufficient_data():
+    stats = {
+        "by_confidence": {9: {"wins": 4, "total": 5}},
+        "by_ticker": {},
+        "by_direction": {"SELL": {"wins": 1, "total": 1}},
+        "total_resolved": 6,
+    }
+    text = format_memory_text(stats, "2026-05-07")
+    assert "SELL: 1T — insufficient data" in text
+    direction_block = text.split("By direction:")[1]
+    assert "%" not in direction_block
+
+
+def test_format_mixed_confidence():
+    stats = {
+        "by_confidence": {
+            8: {"wins": 1, "total": 2},   # below threshold
+            9: {"wins": 7, "total": 11},  # above threshold
+        },
+        "by_ticker": {},
+        "by_direction": {"BUY": {"wins": 8, "total": 13}},
+        "total_resolved": 13,
+    }
+    text = format_memory_text(stats, "2026-05-07")
+    assert "Conf 8: 2T — insufficient data" in text
+    assert "Conf 9: 7W/11T = 64%" in text
+
+
 # ── Tier-3 integration ────────────────────────────────────────────────────────
 
 def test_tier3_uses_memory_text():

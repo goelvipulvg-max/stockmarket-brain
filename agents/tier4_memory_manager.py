@@ -9,6 +9,7 @@ load_dotenv(override=True)
 from utils.supabase_client import get_client
 
 IST = ZoneInfo("Asia/Kolkata")
+MIN_SAMPLES = 3
 
 
 def compute_stats(trades: list) -> dict:
@@ -52,8 +53,11 @@ def format_memory_text(stats: dict, date_str: str) -> str:
     lines.append("By confidence:")
     for conf in sorted(stats["by_confidence"]):
         s = stats["by_confidence"][conf]
-        pct = round(s["wins"] / s["total"] * 100)
-        lines.append(f"  Conf {conf}: {s['wins']}W/{s['total']}T = {pct}%")
+        if s["total"] >= MIN_SAMPLES:
+            pct = round(s["wins"] / s["total"] * 100)
+            lines.append(f"  Conf {conf}: {s['wins']}W/{s['total']}T = {pct}%")
+        else:
+            lines.append(f"  Conf {conf}: {s['total']}T — insufficient data")
 
     if stats["by_ticker"]:
         lines.append("")
@@ -68,8 +72,11 @@ def format_memory_text(stats: dict, date_str: str) -> str:
         lines.append("By direction:")
         for direction in sorted(stats["by_direction"]):
             s = stats["by_direction"][direction]
-            pct = round(s["wins"] / s["total"] * 100)
-            lines.append(f"  {direction}: {s['wins']}W/{s['total']}T = {pct}%")
+            if s["total"] >= MIN_SAMPLES:
+                pct = round(s["wins"] / s["total"] * 100)
+                lines.append(f"  {direction}: {s['wins']}W/{s['total']}T = {pct}%")
+            else:
+                lines.append(f"  {direction}: {s['total']}T — insufficient data")
 
     return "\n".join(lines)
 
