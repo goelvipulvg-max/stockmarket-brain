@@ -4,13 +4,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import pandas as pd
 import pandas_ta as ta
-import requests
 from anthropic import Anthropic
 from dotenv import load_dotenv
 load_dotenv(override=True)
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta, timezone
-from supabase import create_client, Client
+from utils.supabase_client import get_client
+from utils.telegram_client import send_message as tg_send
 from utils import questdb_client
 
 # --- Session ---
@@ -24,12 +24,10 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY)
 SCORE_THRESHOLD = 7
 
 # --- Supabase config ---
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-supabase: Client | None = (
-    create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY else None
-)
+try:
+    supabase = get_client()
+except ValueError:
+    supabase = None
 
 WATCHLIST = [
     "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
@@ -120,15 +118,6 @@ Respond ONLY in this JSON format:
     raw = response.content[0].text.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(raw)
 
-# --- Step 3: Telegram ---
-def send_telegram(message):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_SWING_CHANNEL:
-        print("  Telegram config missing — skipping")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    r = requests.post(url, json={"chat_id": TELEGRAM_SWING_CHANNEL, "text": message, "parse_mode": "HTML"}, timeout=10)
-    r.raise_for_status()
-
 def log_paper_trade(data, signal):
     """Insert all BUY/SELL signals into Supabase paper_trades for analysis."""
     if not supabase:
@@ -216,7 +205,7 @@ def main():
 
             if signal["confidence"] >= SCORE_THRESHOLD and signal["signal"] != "HOLD":
                 msg = format_message(data, signal)
-                send_telegram(msg)
+                tg_send(TELEGRAM_BOT_TOKEN, TELEGRAM_SWING_CHANNEL, msg)
                 posted += 1
                 print(f"  -> Posted [OK]")
         except Exception as e:
