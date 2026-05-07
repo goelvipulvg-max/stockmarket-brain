@@ -63,5 +63,16 @@ reports/
 # Data files (commit only sample/seed data, not full datasets)
 data/raw/
 data/processed/
+data/*.json
+data/*.txt
 *.parquet
 *.feather
+*.csv
+*.html
+
+# Testing (coverage)
+.coverage
+htmlcov/
+
+# IDE (additional)
+*.code-workspace
