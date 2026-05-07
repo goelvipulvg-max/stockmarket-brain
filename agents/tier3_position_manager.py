@@ -21,7 +21,17 @@ anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 
 def apply_rules(signal: dict, open_trades: list) -> tuple:
-    raise NotImplementedError
+    for trade in open_trades:
+        if trade["ticker"] == signal["ticker"] and trade["id"] != signal["id"]:
+            return False, "duplicate_open_position"
+    if signal["confidence"] < 8:
+        return False, "confidence_below_threshold"
+    rsi = signal.get("rsi") or 50.0
+    if signal["direction"] == "BUY" and rsi > 80:
+        return False, "extreme_rsi"
+    if signal["direction"] == "SELL" and rsi < 20:
+        return False, "extreme_rsi"
+    return True, None
 
 
 def evaluate_with_claude(signal: dict, filings: list, news: list, client) -> dict:
