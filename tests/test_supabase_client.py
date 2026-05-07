@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
+pytestmark = pytest.mark.usefixtures("clean_supabase_module")
+
 
 def test_get_client_raises_if_url_empty(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "")

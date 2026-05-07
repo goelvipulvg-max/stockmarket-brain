@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import patch
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def clean_supabase_module():
     """Remove supabase_client from sys.modules and mock load_dotenv before each test.
 
