@@ -113,11 +113,128 @@ def format_summary_message(approved: list, rejected_reasons: list, date_str: str
 
 
 def log_decision(supabase, decision: dict) -> None:
-    raise NotImplementedError
+    try:
+        supabase.table("tier3_decisions").insert(decision).execute()
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "23505" in str(e):
+            print(f"  -> Already decided for {decision['ticker']} today, skipping")
+        else:
+            print(f"  -> tier3_decisions log failed: {type(e).__name__}: {e}")
 
 
 def main():
-    raise NotImplementedError
+    now_ist = datetime.now(IST)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    date_display = now_ist.strftime("%d %b %Y")
+    print(f"Running Tier-3 Position Manager — {today_str}")
+
+    supabase = get_client()
+
+    signals = (
+        supabase.table("paper_trades")
+        .select("*")
+        .eq("signal_date", today_str)
+        .eq("status", "OPEN")
+        .execute()
+        .data
+    )
+    signals = [s for s in signals if s["direction"] in ("BUY", "SELL")]
+    print(f"Signals from Tier-2 today: {len(signals)}")
+
+    if not signals:
+        summary = format_summary_message([], [], date_display)
+        tg_send(TELEGRAM_BOT_TOKEN, TELEGRAM_TIER3_CHANNEL, summary)
+        print("No signals today. Summary posted.")
+        return
+
+    open_trades = (
+        supabase.table("paper_trades")
+        .select("id,ticker,status")
+        .eq("status", "OPEN")
+        .execute()
+        .data
+    )
+
+    news = (
+        supabase.table("news_log")
+        .select("title,summary,score")
+        .order("fetched_at", desc=True)
+        .limit(5)
+        .execute()
+        .data
+    )
+
+    approved = []
+    rejected_reasons = []
+
+    for signal in signals:
+        ticker = signal["ticker"]
+        print(f"\n{ticker}:")
+
+        rule_pass, reject_reason = apply_rules(signal, open_trades)
+        if not rule_pass:
+            print(f"  REJECTED by rules: {reject_reason}")
+            log_decision(supabase, {
+                "signal_date": today_str,
+                "ticker": ticker,
+                "paper_trade_id": signal["id"],
+                "direction": signal["direction"],
+                "confidence_tier2": signal["confidence"],
+                "rule_pass": False,
+                "approved": False,
+                "reject_reason": reject_reason,
+                "position_size": 0,
+            })
+            rejected_reasons.append(reject_reason)
+            continue
+
+        ticker_base = ticker.replace(".NS", "")
+        filings = (
+            supabase.table("filings_log")
+            .select("event_type,summary,material_score")
+            .eq("symbol", ticker_base)
+            .order("published_at", desc=True)
+            .limit(3)
+            .execute()
+            .data
+        )
+
+        result = evaluate_with_claude(signal, filings, news, anthropic_client)
+        verdict = result["verdict"]
+        tier3_confidence = result["confidence"]
+        tier3_reason = result["reason"]
+        is_parse_error = result.get("_parse_error", False)
+
+        is_approved = verdict == "APPROVE"
+        final_reject_reason = None if is_approved else (
+            "claude_parse_error" if is_parse_error else "claude_reject"
+        )
+
+        log_decision(supabase, {
+            "signal_date": today_str,
+            "ticker": ticker,
+            "paper_trade_id": signal["id"],
+            "direction": signal["direction"],
+            "confidence_tier2": signal["confidence"],
+            "rule_pass": True,
+            "confidence_tier3": None if is_parse_error else tier3_confidence,
+            "approved": is_approved,
+            "reject_reason": final_reject_reason,
+            "position_size": 25000 if is_approved else 0,
+        })
+
+        if is_approved:
+            print(f"  APPROVED — Tier-3 confidence: {tier3_confidence}/10")
+            approved.append(signal)
+            msg = format_pick_message(signal, tier3_confidence, tier3_reason)
+            tg_send(TELEGRAM_BOT_TOKEN, TELEGRAM_TIER3_CHANNEL, msg)
+        else:
+            print(f"  REJECTED by Claude: {final_reject_reason}")
+            rejected_reasons.append(final_reject_reason)
+
+    summary = format_summary_message(approved, rejected_reasons, date_display)
+    tg_send(TELEGRAM_BOT_TOKEN, TELEGRAM_TIER3_CHANNEL, summary)
+    print(f"\nDone. Approved: {len(approved)} | Rejected: {len(rejected_reasons)}")
 
 
 if __name__ == "__main__":
