@@ -18,7 +18,7 @@ def compute_stats(trades: list) -> dict:
     by_direction = defaultdict(lambda: {"wins": 0, "total": 0})
 
     for t in trades:
-        is_win = t["status"] == "WIN"
+        is_win = t["status"] == "TARGET_HIT"
         conf = t["confidence_tier2"]
         by_confidence[conf]["total"] += 1
         if is_win:
@@ -92,7 +92,7 @@ def main():
         supabase.table("tier3_decisions")
         .select("confidence_tier2,ticker,direction,paper_trades(status)")
         .eq("approved", True)
-        .in_("paper_trades.status", ["WIN", "LOSS"])
+        .in_("paper_trades.status", ["TARGET_HIT", "SL_HIT"])
         .execute()
         .data
     )
@@ -105,7 +105,7 @@ def main():
             "status": r["paper_trades"]["status"],
         }
         for r in rows
-        if r.get("paper_trades") and r["paper_trades"].get("status") in ("WIN", "LOSS")
+        if r.get("paper_trades") and r["paper_trades"].get("status") in ("TARGET_HIT", "SL_HIT")
     ]
 
     print(f"Resolved approved trades found: {len(trades)}")

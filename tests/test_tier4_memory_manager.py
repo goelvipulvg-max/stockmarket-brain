@@ -5,7 +5,7 @@ from agents.tier3_position_manager import evaluate_with_claude
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-def make_trade(ticker="RELIANCE.NS", direction="BUY", confidence=9, status="WIN"):
+def make_trade(ticker="RELIANCE.NS", direction="BUY", confidence=9, status="TARGET_HIT"):
     return {
         "ticker": ticker,
         "direction": direction,
@@ -18,13 +18,13 @@ def make_trade(ticker="RELIANCE.NS", direction="BUY", confidence=9, status="WIN"
 
 def test_compute_stats_by_confidence():
     trades = [
-        make_trade(confidence=8, status="WIN"),
-        make_trade(confidence=8, status="LOSS"),
-        make_trade(confidence=8, status="LOSS"),
-        make_trade(confidence=9, status="WIN"),
-        make_trade(confidence=9, status="WIN"),
-        make_trade(confidence=9, status="LOSS"),
-        make_trade(confidence=10, status="WIN"),
+        make_trade(confidence=8, status="TARGET_HIT"),
+        make_trade(confidence=8, status="SL_HIT"),
+        make_trade(confidence=8, status="SL_HIT"),
+        make_trade(confidence=9, status="TARGET_HIT"),
+        make_trade(confidence=9, status="TARGET_HIT"),
+        make_trade(confidence=9, status="SL_HIT"),
+        make_trade(confidence=10, status="TARGET_HIT"),
     ]
     stats = compute_stats(trades)
     assert stats["by_confidence"][8] == {"wins": 1, "total": 3}
@@ -34,11 +34,11 @@ def test_compute_stats_by_confidence():
 
 def test_compute_stats_by_ticker_min2():
     trades = [
-        make_trade(ticker="RELIANCE.NS", status="WIN"),
-        make_trade(ticker="RELIANCE.NS", status="LOSS"),
-        make_trade(ticker="TCS.NS", status="WIN"),       # only 1 trade — must be excluded
-        make_trade(ticker="INFY.NS", status="LOSS"),
-        make_trade(ticker="INFY.NS", status="LOSS"),
+        make_trade(ticker="RELIANCE.NS", status="TARGET_HIT"),
+        make_trade(ticker="RELIANCE.NS", status="SL_HIT"),
+        make_trade(ticker="TCS.NS", status="TARGET_HIT"),       # only 1 trade — must be excluded
+        make_trade(ticker="INFY.NS", status="SL_HIT"),
+        make_trade(ticker="INFY.NS", status="SL_HIT"),
     ]
     stats = compute_stats(trades)
     assert "RELIANCE.NS" in stats["by_ticker"]
@@ -50,11 +50,11 @@ def test_compute_stats_by_ticker_min2():
 
 def test_compute_stats_by_direction():
     trades = [
-        make_trade(direction="BUY", status="WIN"),
-        make_trade(direction="BUY", status="WIN"),
-        make_trade(direction="BUY", status="LOSS"),
-        make_trade(direction="SELL", status="LOSS"),
-        make_trade(direction="SELL", status="WIN"),
+        make_trade(direction="BUY", status="TARGET_HIT"),
+        make_trade(direction="BUY", status="TARGET_HIT"),
+        make_trade(direction="BUY", status="SL_HIT"),
+        make_trade(direction="SELL", status="SL_HIT"),
+        make_trade(direction="SELL", status="TARGET_HIT"),
     ]
     stats = compute_stats(trades)
     assert stats["by_direction"]["BUY"] == {"wins": 2, "total": 3}
