@@ -17,7 +17,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install anthropic supabase nsetools requests
+        run: pip install -r requirements.txt
 
       - name: Create .env file
         run: |
@@ -30,7 +30,7 @@ jobs:
           echo "TELEGRAM_LT_CHANNEL=${{ secrets.TELEGRAM_LT_CHANNEL }}" >> .env
           echo "TELEGRAM_SWING_CHANNEL=${{ secrets.TELEGRAM_SWING_CHANNEL }}" >> .env
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
-          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
           echo "PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}" >> .env
           echo "PINECONE_INDEX_NAME=${{ secrets.PINECONE_INDEX_NAME }}" >> .env
           echo "PINECONE_ENVIRONMENT=${{ secrets.PINECONE_ENVIRONMENT }}" >> .env
