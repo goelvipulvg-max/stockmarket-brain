@@ -1,4 +1,4 @@
-﻿import json, urllib.request
+﻿import json, urllib.request, hashlib
 import anthropic
 from utils.supabase_client import get_client
 from utils.telegram_client import send_message
@@ -15,6 +15,14 @@ ai  = anthropic.Anthropic(api_key=env["ANTHROPIC_API_KEY"])
 sb  = get_client()
 BOT = env["TELEGRAM_BOT_TOKEN"]
 MOVERS_CHANNEL = env["TELEGRAM_MOVERS_CHANNEL"]
+
+def url_hash(url: str) -> str:
+    return hashlib.md5(url.encode()).hexdigest()
+
+def is_duplicate(url: str) -> bool:
+    h = url_hash(url)
+    result = sb.table("filings_log").select("id").eq("url_hash", h).execute()
+    return len(result.data) > 0
 
 def fetch_nse_filings():
     headers = {
@@ -77,6 +85,7 @@ def save_to_supabase(filing, clf):
         "material_score": clf.get("material_score",0),
         "raw_title": filing.get("title",""),
         "source_url": filing.get("link",""),
+        "url_hash": url_hash(filing.get("link", "")),
         "telegram_sent": clf.get("telegram_sent", False)
     }).execute()
 
@@ -100,8 +109,21 @@ def main():
     material_count = 0
     for i, filing in enumerate(filings[:10]):
         print(f"\n[{i+1}] {filing['title'][:60]}...")
+        if is_duplicate(filing.get("link", "")):
+            print(f"     ⏭️  Already processed — skipping")
+            continue
         try:
-            clf = classify_filing(filing)
+            try:
+                clf = classify_filing(filing)
+            except (json.JSONDecodeError, ValueError):
+                print(f"     ⚠️ Claude failed — saving as seen to prevent retry")
+                save_to_supabase(filing, {
+                    "event_type": "OTHER",
+                    "material_score": 0,
+                    "summary": "Classification failed",
+                    "is_material": False,
+                })
+                continue
             score = clf.get("material_score", 0)
             print(f"     {clf['event_type']} | Score: {score}/10 | Material: {clf['is_material']}")
             if clf.get("is_material"):
