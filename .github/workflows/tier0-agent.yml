@@ -36,4 +36,6 @@ jobs:
           echo "PINECONE_ENVIRONMENT=${{ secrets.PINECONE_ENVIRONMENT }}" >> .env
 
       - name: Run Tier-0 Agent
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: python agents/tier0_filings.py

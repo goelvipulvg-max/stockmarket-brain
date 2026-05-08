@@ -21,6 +21,7 @@ jobs:
           pip install -r requirements.txt
       - name: Run Paper Trade Updater
         env:
+          PYTHONPATH: ${{ github.workspace }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python agents/update_paper_trades.py
