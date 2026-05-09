@@ -1,8 +1,6 @@
 name: After Hours Watcher
 
 on:
-  schedule:
-    - cron: '*/15 10-17 * * 1-5'  # Every 15 min, 3:30PM–11:00PM IST (Mon-Fri)
   workflow_dispatch:
 
 jobs:

@@ -1,8 +1,6 @@
 name: Pre-Open Alert
 
 on:
-  schedule:
-    - cron: '15 3 * * 1-5'  # 8:45 AM IST (Mon-Fri)
   workflow_dispatch:
 
 jobs:

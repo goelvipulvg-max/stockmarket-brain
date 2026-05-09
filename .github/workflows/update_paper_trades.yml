@@ -1,7 +1,5 @@
 ﻿name: Update Paper Trades
 on:
-  schedule:
-    - cron: "0,30 4-10 * * 1-5"
   workflow_dispatch:
 jobs:
   update-trades:

@@ -1,8 +1,6 @@
 ﻿name: Tier-0 Filing Agent
 
 on:
-  schedule:
-    - cron: '*/30 3-10 * * 1-5'  # Every 30 min, 8:30AM-4PM IST (Mon-Fri)
   workflow_dispatch:  # Manual trigger button on GitHub
 
 jobs:
