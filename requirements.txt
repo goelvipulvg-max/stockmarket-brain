@@ -16,7 +16,7 @@ psycopg2-binary>=2.9.0
 
 # Tier-2 signals dependencies
 yfinance>=0.2.40
-pandas-ta>=0.3.14b0
+
 curl-cffi>=0.6.0
 supabase>=2.7.0
 
