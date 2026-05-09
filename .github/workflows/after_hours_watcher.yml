@@ -1,0 +1,31 @@
+name: After Hours Watcher
+
+on:
+  schedule:
+    - cron: '*/15 10-17 * * 1-5'  # Every 15 min, 3:30PM–11:00PM IST (Mon-Fri)
+  workflow_dispatch:
+
+jobs:
+  run-watcher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run After Hours Watcher
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TRADES_CHANNEL_ID: ${{ secrets.TELEGRAM_TRADES_CHANNEL_ID }}
+        run: python scripts/after_hours_watcher.py
