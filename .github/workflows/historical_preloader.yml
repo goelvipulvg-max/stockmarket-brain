@@ -1,0 +1,58 @@
+name: Historical Preloader
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance requests openai psycopg2-binary python-dotenv
+
+      - name: Create .env file
+        run: |
+          echo "NEON_CONNECTION_STRING=${{ secrets.NEON_CONNECTION_STRING }}" >> .env
+          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> .env
+
+      - name: Run historical preloader
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PRELOADER_TEST_MODE: false
+        run: python scripts/historical_preloader.py
+
+      - name: Print row counts
+        if: always()
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from utils.neon_client import query
+
+          tables = [
+              'company_profiles',
+              'research_cache',
+              'event_outcomes',
+              'pattern_library',
+              'after_hours_queue',
+          ]
+          print()
+          print('=' * 50)
+          print('NEON TABLE ROW COUNTS')
+          print('=' * 50)
+          for t in tables:
+              rows = query(f'SELECT COUNT(*) AS cnt FROM {t}')
+              print(f'  {t:25s} : {rows[0][\"cnt\"]}')
+          print('=' * 50)
+          "
