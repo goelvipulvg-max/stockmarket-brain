@@ -1,0 +1,80 @@
+# Python build / cache (large, useless for context)
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Virtual env contents — HUGE token sink
+**/site-packages/
+**/Lib/
+
+# Lock files (rarely needed in context, very large)
+poetry.lock
+Pipfile.lock
+package-lock.json
+yarn.lock
+uv.lock
+
+# Data files — biggest token saver for stockmarket-brain
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.json.gz
+data/
+datasets/
+
+# Logs & state
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+
+# Claude-Mem internal store (not for re-reading)
+.claude-mem/
+
+# Backtesting outputs
+backtest_results/
+reports/
+reports/output/
+*.html
+*.pdf
+
+# Superpowers planning docs (not useful context)
+docs/superpowers/plans/
+docs/superpowers/specs/
+
+# Notebooks output (keep .ipynb but ignore checkpoints)
+.ipynb_checkpoints/
+
+# Media
+*.mp4
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git internals
+.git/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/

@@ -36,4 +36,8 @@ jobs:
       - name: Run Tier-0 Agent
         env:
           PYTHONPATH: ${{ github.workspace }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TRADES_CHANNEL_ID: ${{ secrets.TELEGRAM_TRADES_CHANNEL_ID }}
         run: python agents/tier0_filings.py
