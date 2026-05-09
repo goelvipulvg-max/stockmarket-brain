@@ -47,9 +47,26 @@ def fetch_nifty500_symbols():
     url = "https://www.niftyindices.com/IndexConstituents/ind_nifty500list.csv"
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(url, headers=headers, timeout=30)
-    df = pd.read_csv(StringIO(r.text))
-    symbols = df["Symbol"].dropna().tolist()
-    symbols = [s.strip() + ".NS" for s in symbols]
+
+    # NSE CSV has extra header rows - skip them
+    df = pd.read_csv(StringIO(r.text), skiprows=1)
+
+    # Print columns to debug
+    print(f"CSV columns: {df.columns.tolist()}")
+    print(f"First 3 rows: {df.head(3)}")
+
+    # Try common column names
+    symbol_col = None
+    for col in df.columns:
+        if 'symbol' in col.lower() or 'ticker' in col.lower():
+            symbol_col = col
+            break
+
+    if not symbol_col:
+        symbol_col = df.columns[2]  # Usually 3rd column
+
+    symbols = df[symbol_col].dropna().tolist()
+    symbols = [str(s).strip() + ".NS" for s in symbols if str(s).strip()]
     print(f"✅ Fetched {len(symbols)} symbols from NSE")
     return symbols
 
