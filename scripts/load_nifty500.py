@@ -48,25 +48,28 @@ def fetch_nifty500_symbols():
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(url, headers=headers, timeout=30)
 
-    # NSE CSV has extra header rows - skip them
-    df = pd.read_csv(StringIO(r.text), skiprows=1)
-
-    # Print columns to debug
-    print(f"CSV columns: {df.columns.tolist()}")
-    print(f"First 3 rows: {df.head(3)}")
-
-    # Try common column names
-    symbol_col = None
-    for col in df.columns:
-        if 'symbol' in col.lower() or 'ticker' in col.lower():
-            symbol_col = col
+    # Find the actual header line containing 'Symbol'
+    lines = r.text.splitlines()
+    header_idx = 0
+    for i, line in enumerate(lines):
+        if 'Symbol' in line or 'symbol' in line:
+            header_idx = i
             break
 
-    if not symbol_col:
-        symbol_col = df.columns[2]  # Usually 3rd column
+    print(f"Header found at line: {header_idx}")
+    print(f"Header content: {lines[header_idx]}")
 
+    # Parse from actual header line
+    clean_csv = "\n".join(lines[header_idx:])
+    df = pd.read_csv(StringIO(clean_csv))
+
+    print(f"Columns: {df.columns.tolist()}")
+
+    # Find symbol column
+    symbol_col = [c for c in df.columns if 'Symbol' in c or 'symbol' in c][0]
     symbols = df[symbol_col].dropna().tolist()
     symbols = [str(s).strip() + ".NS" for s in symbols if str(s).strip()]
+
     print(f"✅ Fetched {len(symbols)} symbols from NSE")
     return symbols
 
