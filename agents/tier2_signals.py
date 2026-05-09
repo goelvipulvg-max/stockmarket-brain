@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import pandas as pd
 import pandas_ta as ta
-from anthropic import Anthropic
+from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv(override=True)
 from curl_cffi import requests as curl_requests
@@ -17,10 +17,9 @@ from utils import questdb_client
 _session = curl_requests.Session(impersonate="chrome124")
 
 # --- Config ---
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_SWING_CHANNEL = os.getenv("TELEGRAM_SWING_CHANNEL", "").strip()
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
 SCORE_THRESHOLD = 7
 
 # --- Supabase config ---
@@ -86,7 +85,7 @@ def get_stock_data(ticker):
         print(f"  fetch failed: {e}")
         return None
 
-# --- Step 2: Claude Signal ---
+# --- Step 2: DeepSeek Signal ---
 def get_signal(data):
     prompt = f"""You are a swing trade analyst for Indian NSE stocks.
 
@@ -109,13 +108,13 @@ Respond ONLY in this JSON format:
   "stop_loss": <float>
 }}"""
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    response = client.chat.completions.create(
+        model="deepseek-v4-flash",
         max_tokens=300,
-    temperature=0,
-    messages=[{"role": "user", "content": prompt}]
-)
-    raw = response.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    raw = response.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(raw)
 
 def log_paper_trade(data, signal):
@@ -168,7 +167,7 @@ def log_signal_questdb(data, signal):
             signal["stop_loss"],
             signal["target"],
             signal["reason"],
-            "claude-haiku",
+            "deepseek-v4-flash",
             False,
             "",
         )

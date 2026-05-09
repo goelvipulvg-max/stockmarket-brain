@@ -1,20 +1,22 @@
-﻿import json, urllib.request, hashlib
-import anthropic
+﻿import json, os, urllib.request, hashlib
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+from openai import OpenAI
 from utils.supabase_client import get_client
 from utils.telegram_client import send_message
+from utils.tradeable_score import is_tradeable, get_tradeable_score
+from utils.liquidity_check import check_liquidity
+from utils.market_context import get_market_context
+from utils.pdf_parser import download_and_parse_nse_pdf, get_pdf_context_summary
 
-env = {}
-with open(".env") as f:
-    for line in f:
-        line = line.strip()
-        if "=" in line and not line.startswith("#"):
-            k, v = line.split("=", 1)
-            env[k.strip()] = v.strip()
-
-ai  = anthropic.Anthropic(api_key=env["ANTHROPIC_API_KEY"])
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com"
+)
 sb  = get_client()
-BOT = env["TELEGRAM_BOT_TOKEN"]
-MOVERS_CHANNEL = env["TELEGRAM_MOVERS_CHANNEL"]
+BOT = os.getenv("TELEGRAM_BOT_TOKEN")
+MOVERS_CHANNEL = os.getenv("TELEGRAM_MOVERS_CHANNEL")
 
 def url_hash(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()
@@ -49,7 +51,8 @@ def fetch_nse_filings():
                 "category": item.get("attchmntType", ""),
                 "pubdate":  item.get("an_dt", ""),
                 "link":     f"https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={item.get('symbol','')}",
-                "exchange": "NSE"
+                "exchange": "NSE",
+                "attchmntFile": item.get("attchmntFile", ""),
             })
         print(f"  Fetched {len(filings)} NSE filings")
         return filings
@@ -67,12 +70,12 @@ Category: {filing['category']}
 Respond ONLY in JSON (no markdown):
 {{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<max 15 words>","is_material":<true if score>=6>}}"""
 
-    msg = ai.messages.create(
-        model="claude-haiku-4-5",
+    resp = client.chat.completions.create(
+        model="deepseek-v4-flash",
         max_tokens=150,
         messages=[{"role": "user", "content": prompt}]
     )
-    text = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
+    text = resp.choices[0].message.content.strip().replace("```json","").replace("```","").strip()
     return json.loads(text)
 
 def save_to_supabase(filing, clf):
@@ -107,6 +110,11 @@ def main():
     }
 
     material_count = 0
+
+    # Loop 2 — Market Context (pre-fetch once, applies to all filings)
+    market_mood, size_multiplier, nifty_change, vix_value = get_market_context()
+    print(f"  Market: {market_mood} | NIFTY {nifty_change:+.2f}% | VIX {vix_value:.1f} | Size: {size_multiplier}x")
+
     for i, filing in enumerate(filings[:10]):
         print(f"\n[{i+1}] {filing['title'][:60]}...")
         if is_duplicate(filing.get("link", "")):
@@ -116,7 +124,7 @@ def main():
             try:
                 clf = classify_filing(filing)
             except (json.JSONDecodeError, ValueError):
-                print(f"     ⚠️ Claude failed — saving as seen to prevent retry")
+                print(f"     ⚠️ AI classification failed — saving as seen to prevent retry")
                 save_to_supabase(filing, {
                     "event_type": "OTHER",
                     "material_score": 0,
@@ -124,6 +132,36 @@ def main():
                     "is_material": False,
                 })
                 continue
+            # Loop 5 — Tradeable Score Gate
+            event_type = clf.get("event_type", "OTHER")
+            if not is_tradeable(event_type):
+                ts = get_tradeable_score(event_type)
+                print(f"     SKIP: {filing['symbol']} — {event_type} score {ts}/10 below threshold")
+                save_to_supabase(filing, clf)
+                continue
+
+            # Loop 6 — Liquidity Gate
+            is_liquid, daily_value = check_liquidity(filing["symbol"])
+            if not is_liquid:
+                print(f"     SKIP: {filing['symbol']} — Low liquidity Rs {daily_value/10000000:.1f}Cr < Rs 5Cr")
+                save_to_supabase(filing, clf)
+                continue
+
+            # Loop 2 — Market Context Gate
+            if size_multiplier == 0.0:
+                print(f"     SKIP: {filing['symbol']} — Market BEARISH (NIFTY down, VIX elevated), no trades today")
+                save_to_supabase(filing, clf)
+                continue
+
+            # Loop 1 — PDF Parser
+            pdf_url = filing.get("attchmntFile", "")
+            pdf_data = download_and_parse_nse_pdf(pdf_url)
+            pdf_summary = get_pdf_context_summary(pdf_data)
+            if pdf_data["pdf_available"]:
+                print(f"     PDF: {pdf_summary[:100]}...")
+            else:
+                print(f"     PDF: {pdf_summary}")
+
             score = clf.get("material_score", 0)
             print(f"     {clf['event_type']} | Score: {score}/10 | Material: {clf['is_material']}")
             if clf.get("is_material"):

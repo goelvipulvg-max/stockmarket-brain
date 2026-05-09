@@ -81,6 +81,51 @@ def format_memory_text(stats: dict, date_str: str) -> str:
     return "\n".join(lines)
 
 
+def update_pattern_library(supabase, trades: list, date_str: str):
+    """
+    Upsert pattern_library with wins AND losses — no survivorship bias.
+    Groups resolved trades by ticker and stores win/loss counts.
+    """
+    if not trades:
+        print("No resolved trades — skipping pattern_library update")
+        return
+
+    by_ticker = defaultdict(lambda: {"wins": 0, "losses": 0})
+    for t in trades:
+        ticker = t["ticker"]
+        if t["status"] == "TARGET_HIT":
+            by_ticker[ticker]["wins"] += 1
+        else:
+            by_ticker[ticker]["losses"] += 1
+
+    for ticker, counts in by_ticker.items():
+        total = counts["wins"] + counts["losses"]
+        success_rate = round(counts["wins"] / total * 100, 2) if total > 0 else None
+
+        pattern_name = f"ticker_{ticker}"
+
+        # Remove existing row for this symbol+pattern to avoid duplicates
+        supabase.table("pattern_library").delete() \
+            .eq("symbol", ticker) \
+            .eq("pattern_name", pattern_name) \
+            .execute()
+
+        supabase.table("pattern_library").insert({
+            "symbol": ticker,
+            "pattern_name": pattern_name,
+            "pattern_data": {
+                "total_signals": total,
+                "wins": counts["wins"],
+                "losses": counts["losses"],
+                "last_updated": date_str,
+            },
+            "success_rate": success_rate,
+            "sample_size": total,
+        }).execute()
+        rate_str = f"= {success_rate}%" if success_rate is not None else ""
+        print(f"  pattern_library upserted: {ticker} — {counts['wins']}W/{counts['losses']}L/{total}T {rate_str}")
+
+
 def main():
     now_ist = datetime.now(IST)
     today_str = now_ist.strftime("%Y-%m-%d")
@@ -124,6 +169,8 @@ def main():
 
     print(f"trade_memory upserted for {today_str} ({stats['total_resolved']} resolved trades)")
     print(memory_text)
+
+    update_pattern_library(supabase, trades, today_str)
 
 
 if __name__ == "__main__":

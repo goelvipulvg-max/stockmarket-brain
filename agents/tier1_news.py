@@ -10,13 +10,13 @@ import json
 import hashlib
 import feedparser
 from datetime import datetime, timezone
-from anthropic import Anthropic
+from openai import OpenAI
 from utils.supabase_client import get_client
 from utils.telegram_client import send_message
 from dotenv import load_dotenv
 import utils.questdb_client as questdb_client
 
-load_dotenv()
+load_dotenv(override=True)
 import re
 for k, v in os.environ.items():
     os.environ[k] = v.strip()
@@ -27,7 +27,7 @@ TELEGRAM_MOVERS_CHAT  = os.getenv("TELEGRAM_MOVERS_CHANNEL")  # e.g. -100xxxxxxx
 SCORE_THRESHOLD       = 6
 
 # ── Clients ────────────────────────────────────────────────────────────────────
-client   = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client   = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 supabase = get_client()
 
 # ── RSS Feeds ──────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ def log_news_questdb(ts, source, url, title, score, category, summary):
     except Exception as e:
         print(f"  -> QuestDB write failed (non-fatal): {type(e).__name__}: {e}")
 
-# ── Haiku Classifier ───────────────────────────────────────────────────────────
+# ── DeepSeek Classifier ───────────────────────────────────────────────────────────
 CLASSIFY_PROMPT = """You are a stock market analyst. Rate this news headline's market impact.
 
 Return ONLY valid JSON, no markdown, no extra text:
@@ -108,13 +108,15 @@ def classify(headline: str, snippet: str) -> dict:
         headline=headline,
         snippet=snippet[:400] if snippet else "N/A"
     )
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = client.chat.completions.create(
+        model="deepseek-v4-flash",
         max_tokens=300,
-        system="You must respond with ONLY a valid JSON object. No preamble, no markdown, no code fences. Just raw JSON.",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": "You must respond with ONLY a valid JSON object. No preamble, no markdown, no code fences. Just raw JSON."},
+            {"role": "user", "content": prompt}
+        ],
     )
-    raw = msg.content[0].text.strip()
+    raw = msg.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
