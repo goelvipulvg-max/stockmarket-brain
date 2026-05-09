@@ -36,8 +36,6 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python -c "
-          import sys
-          sys.path.insert(0, '.')
           from utils.neon_client import query
 
           tables = [
