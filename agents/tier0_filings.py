@@ -16,7 +16,7 @@ client = OpenAI(
 )
 sb  = get_client()
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
-MOVERS_CHANNEL = os.getenv("TELEGRAM_MOVERS_CHANNEL")
+TRADES_CHANNEL = os.getenv("TELEGRAM_TRADES_CHANNEL_ID")
 
 def url_hash(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()
@@ -174,7 +174,7 @@ def main():
                     f"📅 {filing['pubdate']}\n"
                     f"🔗 NSE Filing"
                 )
-                send_message(BOT, MOVERS_CHANNEL, msg)
+                send_message(BOT, TRADES_CHANNEL, msg)
                 clf["telegram_sent"] = True
                 material_count += 1
                 print(f"     ✅ Sent to Telegram!")
