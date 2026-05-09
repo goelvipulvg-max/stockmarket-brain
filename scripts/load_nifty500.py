@@ -44,40 +44,23 @@ def create_fresh_table():
     print("✅ Fresh company_profiles table created")
 
 def fetch_nifty500_symbols():
-    url = "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.nseindia.com/",
-        "Connection": "keep-alive",
-    }
-    session = requests.Session()
-    # First hit NSE homepage to get cookies
-    session.get("https://www.nseindia.com", headers=headers, timeout=30)
-    time.sleep(2)
-    # Then fetch the CSV
-    r = session.get(url, headers=headers, timeout=30)
-
-    print(f"Status code: {r.status_code}")
-    print(f"Response length: {len(r.text)}")
-    print(f"First 200 chars: {r.text[:200]}")
-
-    lines = r.text.splitlines()
+    csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'ind_nifty500list.csv')
+    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        content = f.read()
+    lines = content.splitlines()
     header_idx = 0
     for i, line in enumerate(lines):
         if 'Symbol' in line or 'symbol' in line:
             header_idx = i
             break
-
+    print(f"Header at line {header_idx}: {lines[header_idx]}")
     clean_csv = "\n".join(lines[header_idx:])
     df = pd.read_csv(StringIO(clean_csv))
     symbol_col = [c for c in df.columns if 'Symbol' in c or 'symbol' in c][0]
     symbols = df[symbol_col].dropna().tolist()
     symbols = [str(s).strip() + ".NS" for s in symbols if str(s).strip()]
-
-    print(f"✅ Fetched {len(symbols)} symbols")
+    print(f"✅ Loaded {len(symbols)} symbols from local CSV")
+    return symbols
     return symbols
 
 def upsert_company(symbol, data):
