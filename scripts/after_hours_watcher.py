@@ -6,6 +6,7 @@ import hashlib
 import urllib.request
 from datetime import datetime
 
+import psycopg2
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
@@ -34,6 +35,54 @@ def is_duplicate(url: str) -> bool:
     h = url_hash(url)
     rows = query(f"SELECT id FROM after_hours_queue WHERE url_hash = '{h}'")
     return len(rows) > 0
+
+
+def is_nse500_active(symbol: str) -> bool:
+    """Check if symbol is in NSE 500 active watchlist (Neon)."""
+    clean = symbol.replace(".NS", "").strip().upper()
+    conn = psycopg2.connect(os.getenv("NEON_CONNECTION_STRING"))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT is_active FROM nse500_watchlist WHERE REPLACE(symbol, '.NS', '') = %s",
+                (clean,)
+            )
+            row = cur.fetchone()
+            return row is not None and row[0] is True
+    finally:
+        conn.close()
+
+
+def log_to_filings_log(data: dict):
+    """Insert a classified filing into filings_log (Neon), dedup by url_hash."""
+    conn = psycopg2.connect(os.getenv("NEON_CONNECTION_STRING"))
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO filings_log
+                    (symbol, company_name, exchange, event_type, summary, material_score,
+                     trade_confidence, raw_title, source_url, url_hash, telegram_sent,
+                     fo_checked, created_at)
+                VALUES (%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s, %s,%s)
+                ON CONFLICT (url_hash) DO NOTHING
+            """, (
+                data.get("symbol", ""),
+                data.get("company_name", ""),
+                data.get("exchange", "NSE"),
+                data.get("event_type", "OTHER"),
+                data.get("summary", ""),
+                data.get("material_score", 0),
+                data.get("trade_confidence", 0),
+                data.get("raw_title", ""),
+                data.get("source_url", ""),
+                data.get("url_hash", ""),
+                False,
+                False,
+                datetime.utcnow(),
+            ))
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def fetch_nse_filings():
@@ -78,7 +127,7 @@ Company: {filing['company']}
 Category: {filing['category']}
 
 Respond ONLY in JSON (no markdown):
-{{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<max 15 words>","is_material":<true if score>=6>}}"""
+{{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<max 15 words>","is_material":<true if score>=6>,"trade_confidence":<0-100>}}"""
 
     resp = client.chat.completions.create(
         model="deepseek-v4-flash",
@@ -173,11 +222,36 @@ def main():
             print(f"     Already in queue — skipping")
             continue
 
+        # Gate 1: Must be in NSE 500 active watchlist
+        if not is_nse500_active(filing.get("symbol", "")):
+            print(f"     SKIP: {filing['symbol']} — not in NSE500 active watchlist")
+            continue
+
         try:
             try:
                 clf = classify_filing(filing)
             except (json.JSONDecodeError, ValueError):
                 print(f"     AI classification failed — skipping")
+                continue
+
+            # Log every classified filing to filings_log (Neon)
+            log_to_filings_log({
+                "symbol": filing.get("symbol", ""),
+                "company_name": filing.get("company", ""),
+                "exchange": "NSE",
+                "event_type": clf.get("event_type", "OTHER"),
+                "summary": clf.get("summary", ""),
+                "material_score": clf.get("material_score", 0),
+                "trade_confidence": clf.get("trade_confidence", 0),
+                "raw_title": filing.get("title", ""),
+                "source_url": filing.get("link", ""),
+                "url_hash": url_hash(filing.get("link", "")),
+            })
+
+            # Gate 2: Trade confidence threshold
+            tc = clf.get("trade_confidence", 0)
+            if tc < 70:
+                print(f"     SKIP: {filing['symbol']} — trade_confidence {tc} < 70")
                 continue
 
             event_type = clf.get("event_type", "OTHER")
@@ -212,12 +286,12 @@ def main():
             if clf.get("is_material") and abs(gap_result["expected_gap_pct"]) >= 2.0:
                 ts = get_tradeable_score(event_type)
                 msg = (
-                    f"📋 <b>After Hours Filing Detected</b>\n"
-                    f"🏢 {filing['company']} ({filing['symbol']})\n"
-                    f"📊 {event_type}\n"
+                    f"\U0001f4cb <b>After Hours Filing Detected</b>\n"
+                    f"\U0001f3e2 {filing['company']} ({filing['symbol']})\n"
+                    f"\U0001f4ca {event_type}\n"
                     f"⭐ Score: {ts}/10\n"
-                    f"📈 Expected Gap: {gap_result['expected_gap_pct']}%\n"
-                    f"🎯 Confidence: {gap_result['confidence']}"
+                    f"\U0001f4c8 Expected Gap: {gap_result['expected_gap_pct']}%\n"
+                    f"\U0001f3af Confidence: {gap_result['confidence']}"
                 )
                 send_message(BOT, TRADES_CHANNEL, msg)
                 alerted += 1
