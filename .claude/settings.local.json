@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv/Scripts/python.exe *)"
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(.venv/Scripts/python.exe -u scripts/preloader_single_batch.py --start 305 --end 405)",
+      "Bash(echo \"PID=$! Launched batch [305:405]\")",
+      "PowerShell(Get-Process *)"
     ]
   }
 }
