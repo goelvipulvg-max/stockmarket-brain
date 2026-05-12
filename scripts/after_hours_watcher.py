@@ -298,6 +298,17 @@ def main():
                 send_message(BOT, TRADES_CHANNEL, msg)
                 alerted += 1
                 print(f"     Sent to Telegram!")
+                fh = url_hash(filing.get("link", ""))
+                conn = psycopg2.connect(os.getenv("NEON_CONNECTION_STRING"))
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE filings_log SET telegram_sent = true WHERE url_hash = %s",
+                            (fh,)
+                        )
+                        conn.commit()
+                finally:
+                    conn.close()
 
         except Exception as e:
             print(f"     Error: {e}")
