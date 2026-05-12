@@ -115,7 +115,7 @@ def main():
     market_mood, size_multiplier, nifty_change, vix_value = get_market_context()
     print(f"  Market: {market_mood} | NIFTY {nifty_change:+.2f}% | VIX {vix_value:.1f} | Size: {size_multiplier}x")
 
-    for i, filing in enumerate(filings[:10]):
+    for i, filing in enumerate(filings[:20]):
         print(f"\n[{i+1}] {filing['title'][:60]}...")
         if is_duplicate(filing.get("link", "")):
             print(f"     ⏭️  Already processed — skipping")
