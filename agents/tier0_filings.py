@@ -60,12 +60,20 @@ def fetch_nse_filings():
         print(f"  NSE fetch error: {e}")
         return []
 
-def classify_filing(filing):
+def classify_filing(filing, pdf_summary=None):
     prompt = f"""Classify this NSE corporate filing for Indian retail investors.
 
 Title: {filing['title']}
 Company: {filing['company']}
-Category: {filing['category']}
+Category: {filing['category']}"""
+
+    if pdf_summary and pdf_summary != "PDF not available — using title only.":
+        prompt += f"""
+
+PARSED PDF DATA:
+{pdf_summary}"""
+
+    prompt += """
 
 Respond ONLY in JSON (no markdown):
 {{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<max 15 words>","is_material":<true if score>=6>}}"""
@@ -121,8 +129,17 @@ def main():
             print(f"     ⏭️  Already processed — skipping")
             continue
         try:
+            # Loop 1 — PDF Parser (before classification so model sees PDF data)
+            pdf_url = filing.get("attchmntFile", "")
+            pdf_data = download_and_parse_nse_pdf(pdf_url)
+            pdf_summary = get_pdf_context_summary(pdf_data)
+            if pdf_data["pdf_available"]:
+                print(f"     PDF: {pdf_summary[:100]}...")
+            else:
+                print(f"     PDF: {pdf_summary}")
+
             try:
-                clf = classify_filing(filing)
+                clf = classify_filing(filing, pdf_summary)
             except (json.JSONDecodeError, ValueError):
                 print(f"     ⚠️ AI classification failed — saving as seen to prevent retry")
                 save_to_supabase(filing, {
@@ -153,15 +170,6 @@ def main():
                 save_to_supabase(filing, clf)
                 continue
 
-            # Loop 1 — PDF Parser
-            pdf_url = filing.get("attchmntFile", "")
-            pdf_data = download_and_parse_nse_pdf(pdf_url)
-            pdf_summary = get_pdf_context_summary(pdf_data)
-            if pdf_data["pdf_available"]:
-                print(f"     PDF: {pdf_summary[:100]}...")
-            else:
-                print(f"     PDF: {pdf_summary}")
-
             score = clf.get("material_score", 0)
             print(f"     {clf['event_type']} | Score: {score}/10 | Material: {clf['is_material']}")
             if clf.get("is_material"):
@@ -174,6 +182,19 @@ def main():
                     f"📅 {filing['pubdate']}\n"
                     f"🔗 NSE Filing"
                 )
+                # Append PDF Details if data was extracted
+                pdf_lines = []
+                if pdf_data.get("dividend_amount"):
+                    dtype = pdf_data.get("dividend_type") or ""
+                    pdf_lines.append(f"• Dividend: ₹{pdf_data['dividend_amount']}/share {dtype}")
+                if pdf_data.get("quarter"):
+                    pdf_lines.append(f"• Quarter: {pdf_data['quarter']}")
+                if pdf_data.get("record_date"):
+                    pdf_lines.append(f"• Record Date: {pdf_data['record_date']}")
+                if pdf_data.get("pat"):
+                    pdf_lines.append(f"• PAT: ₹{pdf_data['pat']} Cr")
+                if pdf_lines:
+                    msg += "\n\n📄 <b>PDF Details:</b>\n" + "\n".join(pdf_lines)
                 send_message(BOT, TRADES_CHANNEL, msg)
                 clf["telegram_sent"] = True
                 material_count += 1
