@@ -44,11 +44,11 @@ def is_nse500_active(symbol: str) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT is_active FROM nse500_watchlist WHERE REPLACE(symbol, '.NS', '') = %s",
+                "SELECT status FROM nse500_watchlist WHERE REPLACE(symbol, '.NS', '') = %s",
                 (clean,)
             )
             row = cur.fetchone()
-            return row is not None and row[0] is True
+            return row is not None and row[0].upper() == 'ACTIVE'
     finally:
         conn.close()
 
