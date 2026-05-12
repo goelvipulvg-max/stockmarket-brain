@@ -2,6 +2,12 @@
 
 on:
   workflow_dispatch:  # Manual trigger button on GitHub
+  schedule:
+    # Every 30 min during NSE market hours (9:15 AM - 3:30 PM IST = 3:45-10:00 UTC)
+    # Mon-Fri only (NSE trading days)
+    # Native GitHub cron as fallback — cron-job.org remains primary
+    - cron: '15,45 3-9 * * 1-5'
+    - cron: '0,30 4-9 * * 1-5'
 
 jobs:
   run-agent:

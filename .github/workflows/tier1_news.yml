@@ -2,6 +2,11 @@ name: Tier-1 News Researcher
 
 on:
   workflow_dispatch:
+  schedule:
+    # Every 30 min during NSE market hours (9:15 AM - 3:30 PM IST = 3:45-10:00 UTC)
+    # Mon-Fri only, offset 15 min from Tier-0 to spread load
+    - cron: '0,30 4-9 * * 1-5'
+    - cron: '15,45 3-9 * * 1-5'
 
 jobs:
   run-tier1-news:
