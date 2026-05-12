@@ -9,6 +9,7 @@ from utils.tradeable_score import is_tradeable, get_tradeable_score
 from utils.liquidity_check import check_liquidity
 from utils.market_context import get_market_context
 from utils.pdf_parser import download_and_parse_nse_pdf, get_pdf_context_summary
+from utils.gap_calculator import calculate_expected_gap
 
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
@@ -170,6 +171,14 @@ def main():
                 save_to_supabase(filing, clf)
                 continue
 
+            # Loop 7 — Gap Calculator (after all gates pass)
+            gap_data = None
+            try:
+                gap_data = calculate_expected_gap(event_type, pdf_data, market_mood)
+                print(f"     Gap: {gap_data['expected_gap_pct']:+.2f}% | Confidence: {gap_data['confidence']}")
+            except Exception as e:
+                print(f"     ⚠️ Gap calc failed: {e} — continuing without trade setup")
+
             score = clf.get("material_score", 0)
             print(f"     {clf['event_type']} | Score: {score}/10 | Material: {clf['is_material']}")
             if clf.get("is_material"):
@@ -177,12 +186,9 @@ def main():
                 msg = (
                     f"{emoji} <b>{clf['event_type']}</b>\n"
                     f"🏢 {filing['company']} ({filing['symbol']})\n"
-                    f"📝 {clf['summary']}\n"
-                    f"⭐ Score: {score}/10\n"
-                    f"📅 {filing['pubdate']}\n"
-                    f"🔗 NSE Filing"
+                    f"📝 {clf['summary']}"
                 )
-                # Append PDF Details if data was extracted
+                # PDF Details (Bug #5)
                 pdf_lines = []
                 if pdf_data.get("dividend_amount"):
                     dtype = pdf_data.get("dividend_type") or ""
@@ -195,6 +201,30 @@ def main():
                     pdf_lines.append(f"• PAT: ₹{pdf_data['pat']} Cr")
                 if pdf_lines:
                     msg += "\n\n📄 <b>PDF Details:</b>\n" + "\n".join(pdf_lines)
+                # Trade Setup (Bug #4)
+                if gap_data:
+                    gap_lines = []
+                    gap_lines.append(f"• Expected Gap: {gap_data['expected_gap_pct']:+.1f}%")
+                    if gap_data.get('entry_low_pct') is not None and gap_data.get('entry_high_pct') is not None:
+                        gap_lines.append(f"• Entry Zone: {gap_data['entry_low_pct']:+.1f}% to {gap_data['entry_high_pct']:+.1f}%")
+                    if gap_data.get('target_pct') is not None:
+                        gap_lines.append(f"• Target: {gap_data['target_pct']:+.1f}%")
+                    if gap_data.get('stop_loss_pct') is not None:
+                        gap_lines.append(f"• Stop Loss: {gap_data['stop_loss_pct']:+.1f}%")
+                    target = gap_data.get('target_pct')
+                    sl = gap_data.get('stop_loss_pct')
+                    if target is not None and sl is not None and sl != 0 and target != 0:
+                        if (target > 0 and sl < 0) or (target < 0 and sl > 0):
+                            rr = abs(target / sl)
+                            gap_lines.append(f"• Risk:Reward: 1:{rr:.1f}")
+                    if gap_lines:
+                        msg += "\n\n🎯 <b>Trade Setup:</b>\n" + "\n".join(gap_lines)
+                # Score + Date + Link
+                msg += (
+                    f"\n\n⭐ Score: {score}/10\n"
+                    f"📅 {filing['pubdate']}\n"
+                    f"🔗 NSE Filing"
+                )
                 send_message(BOT, TRADES_CHANNEL, msg)
                 clf["telegram_sent"] = True
                 material_count += 1
