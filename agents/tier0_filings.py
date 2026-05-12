@@ -1,4 +1,5 @@
 ﻿import json, os, urllib.request, hashlib
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
@@ -10,6 +11,7 @@ from utils.liquidity_check import check_liquidity
 from utils.market_context import get_market_context
 from utils.pdf_parser import download_and_parse_nse_pdf, get_pdf_context_summary
 from utils.gap_calculator import calculate_expected_gap
+import utils.questdb_client as questdb_client
 
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
@@ -229,6 +231,28 @@ def main():
                 clf["telegram_sent"] = True
                 material_count += 1
                 print(f"     ✅ Sent to Telegram!")
+                # QuestDB parallel write (non-fatal)
+                try:
+                    sql = (
+                        "INSERT INTO news_events "
+                        "(ts, event_id, source, symbol, headline, url, sentiment, category, summary) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                    )
+                    row = (
+                        datetime.now(timezone.utc),
+                        url_hash(filing.get("link", "")),
+                        "NSE_FILING",
+                        filing.get("symbol", ""),
+                        filing.get("title", ""),
+                        filing.get("link", ""),
+                        float(clf.get("material_score", 0)),
+                        clf.get("event_type", "OTHER"),
+                        clf.get("summary", ""),
+                    )
+                    questdb_client.executemany(sql, [row])
+                    print(f"     📊 QuestDB: written")
+                except Exception as e:
+                    print(f"     ⚠️ QuestDB write failed: {e}")
             save_to_supabase(filing, clf)
         except Exception as e:
             print(f"     ❌ Error: {e}")
