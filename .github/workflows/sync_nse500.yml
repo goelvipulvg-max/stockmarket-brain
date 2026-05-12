@@ -25,6 +25,7 @@ jobs:
 
       - name: Run sync_nse500.py
         env:
+          PYTHONPATH: ${{ github.workspace }}
           NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

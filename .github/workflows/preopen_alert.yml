@@ -25,6 +25,7 @@ jobs:
 
       - name: Run preopen_alert.py
         env:
+          PYTHONPATH: ${{ github.workspace }}
           NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_TRADES_CHANNEL_ID: ${{ secrets.TELEGRAM_TRADES_CHANNEL_ID }}
