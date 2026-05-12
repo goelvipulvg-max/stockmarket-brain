@@ -62,8 +62,8 @@ def log_to_filings_log(data: dict):
                 INSERT INTO filings_log
                     (symbol, company_name, exchange, event_type, summary, material_score,
                      trade_confidence, raw_title, source_url, url_hash, telegram_sent,
-                     fo_checked, created_at)
-                VALUES (%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s, %s,%s)
+                     fo_checked, classified_at, published_at)
+                VALUES (%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s, %s,%s,%s)
                 ON CONFLICT (url_hash) DO NOTHING
             """, (
                 data.get("symbol", ""),
@@ -79,6 +79,7 @@ def log_to_filings_log(data: dict):
                 False,
                 False,
                 datetime.utcnow(),
+                data.get("published_at", None),
             ))
             conn.commit()
     finally:
@@ -246,6 +247,7 @@ def main():
                 "raw_title": filing.get("title", ""),
                 "source_url": filing.get("link", ""),
                 "url_hash": url_hash(filing.get("link", "")),
+                "published_at": filing.get("pubdate", None),
             })
 
             # Gate 2: Trade confidence threshold
