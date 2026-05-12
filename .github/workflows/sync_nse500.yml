@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '30 2 * * 0'  # Sunday 8:00 AM IST (UTC+5:30)
   workflow_dispatch:       # manual trigger from GitHub UI
+  repository_dispatch:
+    types: [sync_nse500]
 
 jobs:
   sync:
