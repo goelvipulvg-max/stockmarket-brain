@@ -1,29 +1,33 @@
 name: Pre-Open Alert
 
 on:
+  schedule:
+    - cron: '30 3 * * 1-5'  # Mon-Fri 9:00 AM IST
   workflow_dispatch:
 
 jobs:
-  run-preopen:
+  alert:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+          cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Pre-Open Alert
+      - name: Run preopen_alert.py
         env:
-          PYTHONPATH: ${{ github.workspace }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_TRADES_CHANNEL_ID: ${{ secrets.TELEGRAM_TRADES_CHANNEL_ID }}
-        run: python scripts/preopen_alert.py
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -u scripts/preopen_alert.py
