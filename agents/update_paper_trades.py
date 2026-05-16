@@ -45,6 +45,14 @@ GAP_WAIT_PCT           = 0.04   # 4% of entry around SL = WAIT zone
 GAP_UP_OPEN_THRESHOLD  = 1.03   # day_open > entry * 1.03
 GAP_UP_TRAIL_FACTOR    = 0.98   # new trailing_sl = day_open * 0.98
 
+
+def _dir_price(entry, mult, direction):
+    """Price at BUY multiplier `mult` of entry. SELL inverts: entry * (2 - mult)."""
+    if direction == "BUY":
+        return round(entry * mult, 2)
+    return round(entry * (2 - mult), 2)
+
+
 try:
     supabase = get_client()
 except ValueError as e:
@@ -132,11 +140,11 @@ def main():
 
         # ── Active target & stop-loss by current level ──
         if current_level == "T3":
-            active_target = t3_price or round(entry * EQ_T3, 2)
+            active_target = t3_price or _dir_price(entry, EQ_T3, direction)
             active_sl = trailing_sl_val or original_sl
         elif current_level == "T2":
-            active_target = t2_price or round(
-                entry * (FNO_T2 if segment == "FNO" else EQ_T2), 2)
+            active_target = t2_price or _dir_price(
+                entry, (FNO_T2 if segment == "FNO" else EQ_T2), direction)
             active_sl = trailing_sl_val or original_sl
         else:
             active_target = original_target
@@ -206,8 +214,8 @@ def main():
                     print(f"  {ticker}: T1 already processed (idempotent), skipping")
                     continue
                 is_fno = (segment == "FNO")
-                t2_p = round(entry * (FNO_T2 if is_fno else EQ_T2), 2)
-                new_sl = round(entry * (FNO_SL_T1 if is_fno else EQ_SL_T1), 2)
+                t2_p = _dir_price(entry, (FNO_T2 if is_fno else EQ_T2), direction)
+                new_sl = _dir_price(entry, (FNO_SL_T1 if is_fno else EQ_SL_T1), direction)
                 update_data = {
                     "t1_hit": True,
                     "current_target_level": "T2",
@@ -215,7 +223,7 @@ def main():
                     "trailing_sl": new_sl,
                 }
                 if not is_fno:
-                    update_data["t3_price"] = round(entry * EQ_T3, 2)
+                    update_data["t3_price"] = _dir_price(entry, EQ_T3, direction)
                 if DRY_RUN:
                     print(f"  [DRY-RUN] Would update: {update_data}")
                 else:
@@ -248,7 +256,7 @@ def main():
                     if t2_hit:
                         print(f"  {ticker}: T2 already processed (idempotent), skipping")
                         continue
-                    trail_sl = round(entry * EQ_SL_T2, 2)
+                    trail_sl = _dir_price(entry, EQ_SL_T2, direction)
                     update_data = {
                         "t2_hit": True,
                         "current_target_level": "T3",
