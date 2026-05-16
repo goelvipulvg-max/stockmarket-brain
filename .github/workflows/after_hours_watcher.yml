@@ -1,8 +1,9 @@
 name: After Hours Watcher
 
 on:
-  schedule:
-    - cron: '0 10 * * 1-5'  # Mon-Fri 3:30 PM IST
+  # DEPRECATED — broken Neon schema mismatch, produced ~1 row in 15 days.
+  # Replaced by Phase 6 (after_hours_v2.py); kept only for logic salvage.
+  # Scheduled runs disabled on 2026-05-16 (Phase 0.8).
   workflow_dispatch:
 
 jobs:
