@@ -1,0 +1,13 @@
+Classify this NSE corporate filing for Indian retail investors.
+
+Title: {title}
+Company: {company}
+Category: {category}{pdf_section}
+
+Respond ONLY in JSON (no markdown):
+{{"event_type":"<pick one from event types below>","material_score":<1-10>,"summary":"<12 words or fewer>","is_material":<true if score>=6>,"trade_confidence":<1-100>,"directional_bias":"BULLISH|BEARISH|NEUTRAL","reasoning":"<20 words or fewer>"}}
+
+Event types (pick exactly one from this list):
+HIGH-IMPACT: RESULTS, DIVIDEND, BONUS, SPLIT, BUYBACK, MERGER_ACQUISITION, ACQUISITION, DIVESTMENT, FUND_RAISE, CONTRACT_WIN, INSIDER_TRADING, BULK_DEAL
+MEDIUM: MANAGEMENT_CHANGE, LEGAL, CREDIT_RATING, AUDIT_REPORT, ALLOTMENT, ESOP, DISCLOSURE, RATING_ACTION
+LOW: BOARD_MEETING, AGM, POSTAL_BALLOT, INVESTOR_PRES, ANNUAL_REPORT, VOTING_RESULTS, NEWSPAPER_PUB, GENERAL_UPDATE, OTHER

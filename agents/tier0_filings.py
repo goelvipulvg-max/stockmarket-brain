@@ -21,6 +21,18 @@ sb  = get_client()
 BOT = os.getenv("TELEGRAM_BOT_TOKEN")
 TRADES_CHANNEL = os.getenv("TELEGRAM_TRADES_CHANNEL_ID")
 
+with open(os.path.join(os.path.dirname(__file__), "..", "prompts", "tier0_classify_v2.txt"), encoding="utf-8") as f:
+    CLASSIFY_PROMPT_V2 = f.read()
+
+VALID_EVENT_TYPES = {
+    "RESULTS", "DIVIDEND", "BONUS", "SPLIT", "BUYBACK", "MERGER_ACQUISITION",
+    "ACQUISITION", "DIVESTMENT", "FUND_RAISE", "CONTRACT_WIN", "INSIDER_TRADING", "BULK_DEAL",
+    "MANAGEMENT_CHANGE", "LEGAL", "CREDIT_RATING", "AUDIT_REPORT", "ALLOTMENT", "ESOP",
+    "DISCLOSURE", "RATING_ACTION",
+    "BOARD_MEETING", "AGM", "POSTAL_BALLOT", "INVESTOR_PRES", "ANNUAL_REPORT",
+    "VOTING_RESULTS", "NEWSPAPER_PUB", "GENERAL_UPDATE", "OTHER"
+}
+
 def url_hash(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()
 
@@ -64,22 +76,16 @@ def fetch_nse_filings():
         return []
 
 def classify_filing(filing, pdf_summary=None, max_retries=2):
-    prompt = f"""Classify this NSE corporate filing for Indian retail investors.
-
-Title: {filing['title']}
-Company: {filing['company']}
-Category: {filing['category']}"""
-
+    pdf_section = ""
     if pdf_summary and pdf_summary != "PDF not available — using title only.":
-        prompt += f"""
+        pdf_section = f"\n\nPARSED PDF DATA:\n{pdf_summary}"
 
-PARSED PDF DATA:
-{pdf_summary}"""
-
-    prompt += """
-
-Respond ONLY in JSON (no markdown):
-{{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<12 words or fewer>","is_material":<true if score>=6>}}"""
+    prompt = CLASSIFY_PROMPT_V2.format(
+        title=filing['title'],
+        company=filing['company'],
+        category=filing['category'],
+        pdf_section=pdf_section,
+    )
 
     for attempt in range(max_retries + 1):
         resp = client.chat.completions.create(
@@ -96,7 +102,12 @@ Respond ONLY in JSON (no markdown):
                 continue
             raise ValueError("Empty response after retries")
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            event_type = parsed.get("event_type", "OTHER")
+            if event_type not in VALID_EVENT_TYPES:
+                print(f"     [WARN] unknown event_type '{event_type}' coerced to OTHER")
+                parsed["event_type"] = "OTHER"
+            return parsed
         except (json.JSONDecodeError, ValueError) as e:
             if attempt < max_retries:
                 print(f"     [WARN] classify_filing attempt {attempt+1}: JSON parse failed ({e}), retrying...")
@@ -113,6 +124,10 @@ def save_to_supabase(filing, clf):
         "event_type": clf.get("event_type","OTHER"),
         "summary": clf.get("summary",""),
         "material_score": clf.get("material_score",0),
+        "is_material": clf.get("is_material", False),
+        "directional_bias": clf.get("directional_bias"),
+        "reasoning": clf.get("reasoning"),
+        "trade_confidence": clf.get("trade_confidence", 0),
         "raw_title": filing.get("title",""),
         "source_url": filing.get("link",""),
         "url_hash": url_hash(filing.get("link", "")),
@@ -166,6 +181,9 @@ def main():
                     "material_score": 0,
                     "summary": "Classification failed",
                     "is_material": False,
+                    "trade_confidence": 0,
+                    "directional_bias": None,
+                    "reasoning": None,
                 })
                 continue
             # Loop 5 — Tradeable Score Gate
