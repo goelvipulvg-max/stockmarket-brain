@@ -1,4 +1,4 @@
-﻿import json, os, urllib.request, hashlib
+﻿import json, os, time, urllib.request, hashlib
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -63,7 +63,7 @@ def fetch_nse_filings():
         print(f"  NSE fetch error: {e}")
         return []
 
-def classify_filing(filing, pdf_summary=None):
+def classify_filing(filing, pdf_summary=None, max_retries=2):
     prompt = f"""Classify this NSE corporate filing for Indian retail investors.
 
 Title: {filing['title']}
@@ -79,15 +79,31 @@ PARSED PDF DATA:
     prompt += """
 
 Respond ONLY in JSON (no markdown):
-{{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<max 15 words>","is_material":<true if score>=6>}}"""
+{{"event_type":"BOARD_MEETING|RESULTS|DIVIDEND|MERGER_ACQUISITION|INSIDER_TRADING|FUND_RAISE|MANAGEMENT_CHANGE|LEGAL|BONUS|SPLIT|BUYBACK|CONTRACT_WIN|OTHER","material_score":<1-10>,"summary":"<12 words or fewer>","is_material":<true if score>=6>}}"""
 
-    resp = client.chat.completions.create(
-        model="deepseek-v4-flash",
-        max_tokens=150,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    text = resp.choices[0].message.content.strip().replace("```json","").replace("```","").strip()
-    return json.loads(text)
+    for attempt in range(max_retries + 1):
+        resp = client.chat.completions.create(
+            model="deepseek-v4-flash",
+            max_tokens=400,
+            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = resp.choices[0].message.content.strip().replace("```json","").replace("```","").replace("{{","{").replace("}}","}").strip()
+        if not text:
+            if attempt < max_retries:
+                print(f"     [WARN] classify_filing attempt {attempt+1}: empty response, retrying...")
+                time.sleep(2)
+                continue
+            raise ValueError("Empty response after retries")
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError) as e:
+            if attempt < max_retries:
+                print(f"     [WARN] classify_filing attempt {attempt+1}: JSON parse failed ({e}), retrying...")
+                time.sleep(2)
+                continue
+            print(f"     [ERROR] classify_filing failed after {max_retries+1} attempts: {e}")
+            raise
 
 def save_to_supabase(filing, clf):
     sb.table("filings_log").insert({
