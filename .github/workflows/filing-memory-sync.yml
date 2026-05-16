@@ -1,0 +1,36 @@
+name: Filing Memory Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 10 min during NSE market hours (9:15 AM - 3:30 PM IST = 3:45-10:00 UTC)
+    # Mon-Fri only
+    - cron: '*/10 3-9 * * 1-5'
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
+          echo "NEON_CONNECTION_STRING=${{ secrets.NEON_CONNECTION_STRING }}" >> .env
+          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> .env
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
+          echo "TELEGRAM_TRADES_CHANNEL_ID=${{ secrets.TELEGRAM_TRADES_CHANNEL_ID }}" >> .env
+
+      - name: Run Filing Memory Sync
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python agents/filing_memory_sync.py
