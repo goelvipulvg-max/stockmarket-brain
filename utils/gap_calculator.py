@@ -29,25 +29,50 @@ MOOD_MULTIPLIERS = {
 }
 
 
-def _get_historical_gap(event_type: str) -> tuple:
+def _get_historical_gap(event_type: str, symbol: str = None) -> tuple:
     """Returns (avg_gap_pct, sample_size) from pattern_library in Neon."""
     try:
         conn = get_neon_connection()
         with conn.cursor() as cur:
+            # Exact match: symbol -> sector -> pattern_name = sector_eventtype
+            if symbol:
+                cur.execute(
+                    "SELECT sector FROM company_profiles WHERE symbol = %s LIMIT 1",
+                    (f"{symbol}.NS",)
+                )
+                sector_row = cur.fetchone()
+                if sector_row and sector_row[0]:
+                    sector = sector_row[0]
+                    pattern_name = f"{sector}_{event_type.lower()}"
+                    cur.execute("""
+                        SELECT (pattern_data->>'avg_impact_pct')::numeric AS avg_gap,
+                               sample_size
+                        FROM pattern_library
+                        WHERE pattern_name = %s
+                    """, (pattern_name,))
+                    row = cur.fetchone()
+                    if row and row[1] and row[1] > 0:
+                        gap = float(row[0]) if row[0] else None
+                        samples = int(row[1])
+                        conn.close()
+                        return gap, samples
+
+            # Fallback: LIKE suffix match across all sectors
             cur.execute("""
-                SELECT
-                    COALESCE(AVG((pattern_data->>'avg_gap_pct')::numeric), 0) AS avg_gap,
-                    COALESCE(SUM((pattern_data->>'sample_size')::int), 0)       AS total_samples
+                SELECT (pattern_data->>'avg_impact_pct')::numeric AS avg_gap,
+                       sample_size
                 FROM pattern_library
-                WHERE pattern_name = %s
-            """, (event_type,))
+                WHERE pattern_name LIKE %s
+                ORDER BY sample_size DESC
+                LIMIT 1
+            """, (f"%_{event_type.lower()}",))
             row = cur.fetchone()
         conn.close()
-        if not row:
-            return None, 0
-        gap = float(row[0]) if row[0] else None
-        samples = int(row[1]) if row[1] else 0
-        return gap, samples
+        if row and row[1] and row[1] > 0:
+            gap = float(row[0]) if row[0] else None
+            samples = int(row[1])
+            return gap, samples
+        return None, 0
     except Exception:
         return None, 0
 
