@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, date, time as dt_time
 from zoneinfo import ZoneInfo
 from utils.supabase_client import get_client
+from utils.capital_ledger import release_capital
 from curl_cffi import requests as curl_requests
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -250,6 +251,14 @@ def main():
                         supabase.table("paper_trades").update(update_data)\
                             .eq("id", trade["id"]).execute()
                     closed += 1
+                    # Phase 2: release capital on close (D3: skip NULL-quantity trades)
+                    if not DRY_RUN:
+                        qty = trade.get("quantity")
+                        if qty is not None:
+                            pnl_rs = round((pnl / 100) * entry * qty, 2)
+                            release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+                        else:
+                            print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
                     print(f"  {ticker}: T2_HIT (FNO) @ {exit_price} | PnL: {pnl}% | "
                           f"CLOSED  (day {holding_days})")
                 else:
@@ -286,6 +295,14 @@ def main():
                     supabase.table("paper_trades").update(update_data)\
                         .eq("id", trade["id"]).execute()
                 closed += 1
+                # Phase 2: release capital on close (D3: skip NULL-quantity trades)
+                if not DRY_RUN:
+                    qty = trade.get("quantity")
+                    if qty is not None:
+                        pnl_rs = round((pnl / 100) * entry * qty, 2)
+                        release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+                    else:
+                        print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
                 print(f"  {ticker}: T3_HIT @ {exit_price} | PnL: {pnl}% | "
                       f"CLOSED  (day {holding_days})")
 
@@ -306,6 +323,14 @@ def main():
                 supabase.table("paper_trades").update(update_data)\
                     .eq("id", trade["id"]).execute()
             closed += 1
+            # Phase 2: release capital on close (D3: skip NULL-quantity trades)
+            if not DRY_RUN:
+                qty = trade.get("quantity")
+                if qty is not None:
+                    pnl_rs = round((pnl / 100) * entry * qty, 2)
+                    release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+                else:
+                    print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
             print(f"  {ticker}: {label} @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         elif new_status == "EXPIRED":
@@ -323,6 +348,14 @@ def main():
                 supabase.table("paper_trades").update(update_data)\
                     .eq("id", trade["id"]).execute()
             closed += 1
+            # Phase 2: release capital on close (D3: skip NULL-quantity trades)
+            if not DRY_RUN:
+                qty = trade.get("quantity")
+                if qty is not None:
+                    pnl_rs = round((pnl / 100) * entry * qty, 2)
+                    release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+                else:
+                    print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
             print(f"  {ticker}: EXPIRED @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         else:
