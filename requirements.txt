@@ -22,3 +22,7 @@ yfinance>=0.2.40
 curl-cffi>=0.6.0
 # Phase 3 backtesting
 vectorbt>=0.26.2
+
+# Phase 3 shared utilities
+pandas-market-calendars>=5.3.0
+pandas-ta>=0.4.0
