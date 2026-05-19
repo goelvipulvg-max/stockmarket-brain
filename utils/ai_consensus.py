@@ -1,0 +1,278 @@
+"""AI Consensus — dual-model filing evaluation with analyst + verifier pattern.
+
+Analyst: Claude Haiku 4.5 (Anthropic SDK). Verifier: DeepSeek V4 Flash (OpenAI SDK).
+"""
+
+import json
+import os
+import time
+from pathlib import Path
+
+from anthropic import Anthropic
+from openai import OpenAI
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
+DEEPSEEK_MODEL = "deepseek-v4-flash"
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+
+haiku_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+ANALYST_PROMPT = (_PROMPTS_DIR / "ai_consensus_analyst.txt").read_text(encoding="utf-8")
+VERIFIER_PROMPT = (_PROMPTS_DIR / "ai_consensus_verifier.txt").read_text(encoding="utf-8")
+
+
+def _retry_json(call_fn, label="model", max_retries=2):
+    """Call `call_fn()` -> raw text, clean + parse JSON, retry on failure.
+
+    `call_fn` is a zero-arg closure that invokes the SDK and returns the raw
+    text from the response. This keeps the retry logic SDK-agnostic — the
+    closure handles Anthropic vs OpenAI response path differences.
+    """
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        raw = call_fn()
+
+        if not isinstance(raw, str) or not raw.strip():
+            if attempt < max_retries:
+                print(f"  [WARN] {label} attempt {attempt+1}: empty response, retrying...")
+                time.sleep(2)
+                continue
+            raise ValueError(f"{label}: empty response after {max_retries+1} attempts")
+
+        text = raw.strip()
+        text = text.replace("```json", "").replace("```", "")
+        text = text.replace("{{", "{").replace("}}", "}")
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            last_error = e
+            if attempt < max_retries:
+                print(f"  [WARN] {label} attempt {attempt+1}: JSON parse failed ({e}), retrying...")
+                time.sleep(2)
+                continue
+            raise ValueError(
+                f"{label}: JSON parse failed after {max_retries+1} attempts: {e}"
+            ) from e
+
+    raise last_error
+
+
+def run_analyst(context):
+    """Call Haiku analyst. Returns parsed dict with tradeable, directional_bias, etc."""
+
+    def _call():
+        response = haiku_client.messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=600,
+            temperature=0.3,
+            messages=[{"role": "user", "content": ANALYST_PROMPT.format(context=context)}],
+        )
+        if response.content and response.content[0].text:
+            return response.content[0].text
+        return ""
+
+    return _retry_json(_call, label="analyst")
+
+
+def run_verifier(context, analyst_output):
+    """Call DeepSeek verifier. Returns parsed dict with verdict, agreement_score, etc."""
+
+    def _call():
+        response = deepseek_client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            max_tokens=600,
+            temperature=0.3,
+            messages=[{"role": "user", "content": VERIFIER_PROMPT.format(
+                context=context, analyst_output=json.dumps(analyst_output)
+            )}],
+        )
+        if response.choices and response.choices[0].message.content:
+            return response.choices[0].message.content
+        return ""
+
+    return _retry_json(_call, label="verifier")
+
+
+def _run_deepseek_as_analyst(context):
+    """Solo fallback: route the analyst prompt through DeepSeek when Anthropic is down."""
+
+    def _call():
+        response = deepseek_client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            max_tokens=600,
+            temperature=0.3,
+            messages=[{"role": "user", "content": ANALYST_PROMPT.format(context=context)}],
+        )
+        if response.choices and response.choices[0].message.content:
+            return response.choices[0].message.content
+        return ""
+
+    return _retry_json(_call, label="solo-deepseek")
+
+
+def _safe_conf(d, key):
+    """Read an integer confidence field; return None if missing or not a number."""
+    v = d.get(key)
+    if isinstance(v, (int, float)):
+        return v
+    return None
+
+
+def determine_consensus(haiku, flash):
+    """Two-model decision logic (§7.3). Returns (decision, reason)."""
+    if not haiku.get("tradeable"):
+        return ("SKIP", "Analyst says not tradeable")
+
+    if flash.get("verdict") == "CHALLENGE" and flash.get("agreement_score", 0) < 70:
+        return ("SKIP", f"Verifier challenged ({flash['agreement_score']})")
+
+    if haiku["directional_bias"] != flash["my_directional_bias"]:
+        return ("SKIP", "Direction mismatch")
+
+    haiku_conf = _safe_conf(haiku, "confidence")
+    flash_conf = _safe_conf(flash, "my_confidence")
+    if haiku_conf is None or flash_conf is None:
+        return ("SKIP", "Missing or invalid confidence field")
+
+    avg_conf = (haiku_conf + flash_conf) / 2
+    if avg_conf < 65:
+        return ("SKIP", f"Avg confidence {avg_conf} < 65")
+
+    return ("PROCEED", "Consensus reached")
+
+
+def get_consensus(context):
+    """Orchestrator — always returns the same dict shape regardless of path.
+
+    Keys: mode, decision, reason, directional_bias, confidence,
+          expected_move_pct, horizon, analyst_raw, verifier_raw
+    """
+    base = {
+        "mode": "SKIP",
+        "decision": "SKIP",
+        "reason": "",
+        "directional_bias": None,
+        "confidence": None,
+        "expected_move_pct": None,
+        "horizon": None,
+        "analyst_raw": None,
+        "verifier_raw": None,
+    }
+
+    try:
+        # Step 1 — run analyst
+        analyst = None
+        try:
+            analyst = run_analyst(context)
+        except Exception:
+            pass
+
+        # Step 2 — if analyst failed, try DeepSeek as analyst fallback
+        if analyst is None:
+            try:
+                analyst = _run_deepseek_as_analyst(context)
+            except Exception:
+                base["reason"] = "Both models unavailable"
+                return base
+
+            tradeable = analyst.get("tradeable", False)
+            conf = _safe_conf(analyst, "confidence")
+            if conf is None:
+                base.update(
+                    mode="SOLO_DEEPSEEK",
+                    reason="Solo DeepSeek — missing or invalid confidence field",
+                    analyst_raw=analyst,
+                )
+            else:
+                haircut_conf = int(conf * 0.9)
+                if tradeable and haircut_conf >= 65:
+                    base.update(
+                        mode="SOLO_DEEPSEEK",
+                        decision="PROCEED",
+                        reason=f"Solo DeepSeek — confidence {haircut_conf} after 10% haircut",
+                        directional_bias=analyst.get("directional_bias"),
+                        confidence=haircut_conf,
+                        expected_move_pct=analyst.get("expected_move_pct"),
+                        horizon=analyst.get("horizon"),
+                        analyst_raw=analyst,
+                    )
+                else:
+                    base.update(
+                        mode="SOLO_DEEPSEEK",
+                        reason=f"Solo DeepSeek — confidence {haircut_conf} < 65"
+                        if tradeable
+                        else "Analyst says not tradeable",
+                        analyst_raw=analyst,
+                    )
+            return base
+
+        # Step 3 — analyst succeeded, try verifier
+        verifier = None
+        try:
+            verifier = run_verifier(context, analyst)
+        except Exception:
+            pass
+
+        # Step 4 — CONSENSUS path (both succeeded)
+        if verifier is not None:
+            decision, reason = determine_consensus(analyst, verifier)
+            base.update(
+                mode="CONSENSUS",
+                decision=decision,
+                reason=reason,
+                analyst_raw=analyst,
+                verifier_raw=verifier,
+            )
+            if decision == "PROCEED":
+                base.update(
+                    directional_bias=analyst.get("directional_bias"),
+                    confidence=analyst.get("confidence"),
+                    expected_move_pct=analyst.get("expected_move_pct"),
+                    horizon=analyst.get("horizon"),
+                )
+            return base
+
+        # Step 5 — SOLO_HAIKU path (analyst OK, verifier failed)
+        tradeable = analyst.get("tradeable", False)
+        conf = _safe_conf(analyst, "confidence")
+        if conf is None:
+            base.update(
+                mode="SOLO_HAIKU",
+                reason="Solo Haiku — missing or invalid confidence field",
+                analyst_raw=analyst,
+            )
+        else:
+            haircut_conf = int(conf * 0.9)
+            if tradeable and haircut_conf >= 65:
+                base.update(
+                    mode="SOLO_HAIKU",
+                    decision="PROCEED",
+                    reason=f"Solo Haiku — confidence {haircut_conf} after 10% haircut",
+                    directional_bias=analyst.get("directional_bias"),
+                    confidence=haircut_conf,
+                    expected_move_pct=analyst.get("expected_move_pct"),
+                    horizon=analyst.get("horizon"),
+                    analyst_raw=analyst,
+                )
+            else:
+                base.update(
+                    mode="SOLO_HAIKU",
+                    reason=f"Solo Haiku — confidence {haircut_conf} < 65"
+                    if tradeable
+                    else "Analyst says not tradeable",
+                    analyst_raw=analyst,
+                )
+        return base
+
+    except Exception as e:
+        base["reason"] = f"Unexpected error: {e}"
+        return base
