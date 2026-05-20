@@ -1,0 +1,34 @@
+name: Filing Memory Backfill
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Once daily, weekdays at 19:00 UTC = 00:30 IST next day.
+    # Runs AFTER market close (3:30 PM IST = 10:00 UTC) + a 5-hour buffer for yfinance
+    # to publish the day's daily bar (typically by 6-7 PM IST). Update-only idempotency
+    # in the agent means re-runs naturally pick up newly matured windows.
+    - cron: '0 19 * * 1-5'
+
+jobs:
+  run-backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
+
+      - name: Run Filing Memory Backfill
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python agents/filing_memory_backfill.py
