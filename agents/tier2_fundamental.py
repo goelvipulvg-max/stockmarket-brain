@@ -290,6 +290,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     trade_payload = {
         "ticker": symbol + ".NS",
         "source": "TIER2F",
+        "filing_id": filing_id,
         "direction": direction,
         "entry_price": round(entry, 2),
         "stop_loss": round(sl, 2),
