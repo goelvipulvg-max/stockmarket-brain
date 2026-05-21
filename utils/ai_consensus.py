@@ -66,15 +66,17 @@ def _retry_json(call_fn, label="model", max_retries=2):
     raise last_error
 
 
-def run_analyst(context):
+def run_analyst(context, prompt_template: str | None = None):
     """Call Haiku analyst. Returns parsed dict with tradeable, directional_bias, etc."""
+
+    template = prompt_template if prompt_template is not None else ANALYST_PROMPT
 
     def _call():
         response = haiku_client.messages.create(
             model=HAIKU_MODEL,
             max_tokens=600,
             temperature=0.3,
-            messages=[{"role": "user", "content": ANALYST_PROMPT.format(context=context)}],
+            messages=[{"role": "user", "content": template.format(context=context)}],
         )
         if response.content and response.content[0].text:
             return response.content[0].text
@@ -83,15 +85,17 @@ def run_analyst(context):
     return _retry_json(_call, label="analyst")
 
 
-def run_verifier(context, analyst_output):
+def run_verifier(context, analyst_output, prompt_template: str | None = None):
     """Call DeepSeek verifier. Returns parsed dict with verdict, agreement_score, etc."""
+
+    template = prompt_template if prompt_template is not None else VERIFIER_PROMPT
 
     def _call():
         response = deepseek_client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             max_tokens=600,
             temperature=0.3,
-            messages=[{"role": "user", "content": VERIFIER_PROMPT.format(
+            messages=[{"role": "user", "content": template.format(
                 context=context, analyst_output=json.dumps(analyst_output)
             )}],
         )
