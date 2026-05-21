@@ -22,8 +22,11 @@ anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 def apply_rules(signal: dict, open_trades: list) -> tuple:
     for trade in open_trades:
-        if trade["ticker"] == signal["ticker"] and trade["id"] != signal["id"]:
-            return False, "duplicate_open_position"
+        # Gap 5 fix (Phase 5 Batch B): allow one OPEN per (ticker, source) instead of per ticker
+        if (trade["ticker"] == signal["ticker"]
+            and trade["source"] == signal["source"]
+            and trade["id"] != signal["id"]):
+            return False, f"duplicate_open_position_for_source_{signal['source']}"
     if signal["confidence"] < 8:
         return False, "confidence_below_threshold"
     rsi = signal.get("rsi") or 50.0
@@ -152,7 +155,7 @@ def main():
 
     open_trades = (
         supabase.table("paper_trades")
-        .select("id,ticker,status")
+        .select("id,ticker,source,status")
         .eq("status", "OPEN")
         .execute()
         .data
