@@ -1,0 +1,35 @@
+name: Tier-2F Fundamental Signal
+
+on:
+  workflow_dispatch:
+    inputs:
+      filing_id:
+        description: 'filings_log row ID to process'
+        required: true
+        type: string
+
+jobs:
+  run-tier2f:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Create .env file
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> .env
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
+          echo "TELEGRAM_TIER3_CHANNEL=${{ secrets.TELEGRAM_TIER3_CHANNEL }}" >> .env
+          echo "NEON_DATABASE_URL=${{ secrets.NEON_DATABASE_URL }}" >> .env
+      - name: Run Tier-2F
+        run: python -m agents.tier2_fundamental --filing-id ${{ inputs.filing_id }}
