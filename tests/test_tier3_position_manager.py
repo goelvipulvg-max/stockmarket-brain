@@ -13,6 +13,7 @@ def make_signal(**kwargs):
     base = {
         "id": 1,
         "ticker": "RELIANCE.NS",
+        "source": "TIER2F",
         "direction": "BUY",
         "confidence": 8,
         "rsi": 55.0,
@@ -29,11 +30,11 @@ def make_signal(**kwargs):
 # ── apply_rules ───────────────────────────────────────────────────────────────
 
 def test_rule_duplicate_open():
-    signal = make_signal(id=1, ticker="RELIANCE.NS")
-    open_trades = [{"id": 2, "ticker": "RELIANCE.NS", "status": "OPEN"}]
+    signal = make_signal(id=1, ticker="RELIANCE.NS", source="TIER2F")
+    open_trades = [{"id": 2, "ticker": "RELIANCE.NS", "source": "TIER2F", "status": "OPEN"}]
     passed, reason = apply_rules(signal, open_trades)
     assert passed is False
-    assert reason == "duplicate_open_position"
+    assert reason == "duplicate_open_position_for_source_TIER2F"
 
 
 def test_rule_confidence_threshold():
