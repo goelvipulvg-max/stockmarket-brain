@@ -76,10 +76,14 @@ def run_analyst(context, prompt_template: str | None = None):
             model=HAIKU_MODEL,
             max_tokens=600,
             temperature=0.3,
+            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": template.format(context=context)}],
         )
-        if response.content and response.content[0].text:
-            return response.content[0].text
+        # Anthropic SDK can return multiple content blocks (ThinkingBlock + TextBlock
+        # when extended thinking is enabled). Find the first TextBlock with non-empty text.
+        for block in response.content:
+            if hasattr(block, 'text') and block.text:
+                return block.text
         return ""
 
     return _retry_json(_call, label="analyst")
