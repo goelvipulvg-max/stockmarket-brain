@@ -27,7 +27,7 @@ def apply_rules(signal: dict, open_trades: list) -> tuple:
             and trade["source"] == signal["source"]
             and trade["id"] != signal["id"]):
             return False, f"duplicate_open_position_for_source_{signal['source']}"
-    if signal["confidence"] < 8:
+    if signal["confidence"] < 50:
         return False, "confidence_below_threshold"
     rsi = signal.get("rsi") or 50.0
     if signal["direction"] == "BUY" and rsi > 80:
@@ -56,7 +56,7 @@ Signal from Tier-2:
 - Ticker: {signal['ticker']}
 - Direction: {signal['direction']}
 - Entry: ₹{signal['entry_price']} | Target: ₹{signal['target_price']} | SL: ₹{signal['stop_loss']}
-- Tier-2 Confidence: {signal['confidence']}/10
+- Tier-2 Confidence: {signal['confidence']}/100
 - Reason: {signal['reason']}
 - RSI: {signal['rsi']} | MACD: {signal['macd']}
 
@@ -95,7 +95,7 @@ def format_pick_message(signal: dict, tier3_confidence: int, tier3_reason: str) 
         f'✅ <b>TIER-3 APPROVED</b> — <b>{signal["ticker"]}</b>\n\n'
         f'{arrow} Direction: {direction}\n'
         f'\U0001f4b0 Entry: ₹{signal["entry_price"]:.2f} | Target: ₹{signal["target_price"]:.2f} | SL: ₹{signal["stop_loss"]:.2f}\n'
-        f'\U0001f3af Tier-2 Confidence: {signal["confidence"]}/10 | Tier-3 Confidence: {tier3_confidence}/10\n'
+        f'\U0001f3af Tier-2 Confidence: {signal["confidence"]}/100 | Tier-3 Confidence: {tier3_confidence}/10\n'
         f'\U0001f4b5 Position Size: ₹25,000\n\n'
         f'\U0001f4dd Tier-2: {signal["reason"]}\n'
         f'\U0001f50d Tier-3: {tier3_reason}'

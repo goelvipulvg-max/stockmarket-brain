@@ -15,7 +15,7 @@ def make_signal(**kwargs):
         "ticker": "RELIANCE.NS",
         "source": "TIER2F",
         "direction": "BUY",
-        "confidence": 8,
+        "confidence": 80,
         "rsi": 55.0,
         "macd": 12.5,
         "entry_price": 2450.0,
@@ -38,7 +38,7 @@ def test_rule_duplicate_open():
 
 
 def test_rule_confidence_threshold():
-    signal = make_signal(confidence=7)
+    signal = make_signal(confidence=49)
     passed, reason = apply_rules(signal, [])
     assert passed is False
     assert reason == "confidence_below_threshold"
@@ -59,7 +59,7 @@ def test_rule_extreme_rsi_sell():
 
 
 def test_rule_all_pass():
-    signal = make_signal(id=1, ticker="RELIANCE.NS", confidence=8, rsi=55.0, direction="BUY")
+    signal = make_signal(id=1, ticker="RELIANCE.NS", confidence=80, rsi=55.0, direction="BUY")
     open_trades = [{"id": 2, "ticker": "TCS.NS", "status": "OPEN"}]
     passed, reason = apply_rules(signal, open_trades)
     assert passed is True
