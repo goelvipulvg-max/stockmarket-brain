@@ -1,7 +1,7 @@
 # ============================================================
 # StockMarket-Brain | Tier-3 Position Manager
 # ============================================================
-# Trigger: fires automatically when Tier-2 Swing Signals succeeds
+# Trigger: fires automatically when Tier-2F Fundamental Signal succeeds
 # Duration: ~2-3 min per run (10 tickers, Claude calls for rule-passers)
 # Output:   Telegram TIER3_PICKS channel
 # Manual:   Actions tab → "Run workflow" button
@@ -11,7 +11,7 @@ name: Tier-3 Position Manager
 
 on:
   workflow_run:
-    workflows: ["Tier-2 Swing Signals"]
+    workflows: ["Tier-2F Fundamental Signal"]
     types: [completed]
   workflow_dispatch:
 
