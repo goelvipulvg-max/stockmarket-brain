@@ -25,11 +25,11 @@ jobs:
       - name: Create .env file
         run: |
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
-          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
           echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
           echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> .env
           echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
           echo "TELEGRAM_TIER3_CHANNEL=${{ secrets.TELEGRAM_TIER3_CHANNEL }}" >> .env
-          echo "NEON_DATABASE_URL=${{ secrets.NEON_DATABASE_URL }}" >> .env
+          echo "NEON_CONNECTION_STRING=${{ secrets.NEON_CONNECTION_STRING }}" >> .env
       - name: Run Tier-2F
         run: python -m agents.tier2_fundamental --filing-id ${{ inputs.filing_id }}
