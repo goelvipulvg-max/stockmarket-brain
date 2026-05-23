@@ -3,6 +3,14 @@ import pytest
 from unittest.mock import patch
 
 
+def pytest_configure(config):
+    """Register custom markers so -m integration filters cleanly (no warnings)."""
+    config.addinivalue_line(
+        "markers",
+        "integration: hits the real DB / external services; run with -m integration",
+    )
+
+
 @pytest.fixture
 def clean_supabase_module():
     """Remove supabase_client from sys.modules and mock load_dotenv before each test.

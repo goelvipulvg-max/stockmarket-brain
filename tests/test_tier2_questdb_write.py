@@ -53,7 +53,7 @@ def test_buy_signal_inserts_correct_row():
         assert row[7] == 2750.0                                     # stop_loss
         assert row[8] == 3050.0                                     # take_profit
         assert row[9] == "RSI oversold, MACD bullish crossover"     # reasoning
-        assert row[10] == "claude-haiku"                            # source
+        assert row[10] == "deepseek-v4-flash"                       # source (model migrated Haiku -> DeepSeek)
         assert row[11] is False                                     # triggered
         assert row[12] == ""                                        # trade_id
 
