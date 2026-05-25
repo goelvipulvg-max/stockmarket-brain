@@ -11,6 +11,7 @@ from utils.liquidity_check import check_liquidity
 from utils.market_context import get_market_context
 from utils.pdf_parser import download_and_parse_nse_pdf, get_pdf_context_summary
 from utils.gap_calculator import calculate_expected_gap
+from utils.nse_dates import parse_nse_datetime
 import utils.questdb_client as questdb_client
 
 client = OpenAI(
@@ -131,6 +132,7 @@ def save_to_supabase(filing, clf):
         "raw_title": filing.get("title",""),
         "source_url": filing.get("link",""),
         "url_hash": url_hash(filing.get("link", "")),
+        "published_at": parse_nse_datetime(filing.get("pubdate")),
         "telegram_sent": clf.get("telegram_sent", False)
     }).execute()
 
