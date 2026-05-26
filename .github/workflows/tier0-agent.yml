@@ -47,4 +47,5 @@ jobs:
           NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_TRADES_CHANNEL_ID: ${{ secrets.TELEGRAM_TRADES_CHANNEL_ID }}
+          USE_NEW_DEDUP_KEY: "false"
         run: python agents/tier0_filings.py

@@ -105,7 +105,7 @@ def fetch_nse_filings():
         for item in data[:20]:
             filings.append({
                 "title":    item.get("desc", ""),
-                "company":  item.get("company", ""),
+                "company":  item.get("sm_name", ""),
                 "symbol":   item.get("symbol", ""),
                 "category": item.get("attchmntType", ""),
                 "pubdate":  item.get("an_dt", ""),

@@ -14,6 +14,10 @@ from utils.gap_calculator import calculate_expected_gap
 from utils.nse_dates import parse_nse_datetime
 import utils.questdb_client as questdb_client
 
+# Feature flag: switch dedup key between legacy (symbol-URL) and new
+# composite (symbol|seq_id). Default false = legacy behavior preserved.
+USE_NEW_DEDUP_KEY = os.getenv("USE_NEW_DEDUP_KEY", "false").lower() == "true"
+
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com"
@@ -60,14 +64,38 @@ def fetch_nse_filings():
             data = json.loads(r.read())
         filings = []
         for item in data[:20]:
+            symbol = item.get("symbol", "")
+            seq_id = item.get("seq_id", "")
+            attch = (item.get("attchmntFile") or "").strip()
+
+            # source_url with "-" placeholder fallback (Phase 2 Decision 2)
+            if attch and attch != "-":
+                source_url = attch
+            else:
+                source_url = f"https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={symbol}"
+
+            # Compute BOTH dedup keys for Gate B dry-run comparison
+            dedup_key_new = f"{symbol}|{seq_id}"
+            dedup_key_old = f"https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={symbol}"
+
+            # Feature flag selects active key (default false = legacy behavior)
+            active_dedup_key = dedup_key_new if USE_NEW_DEDUP_KEY else dedup_key_old
+
+            # Gate B observability: log both hashes for comparison analysis
+            new_hash_short = hashlib.md5(dedup_key_new.encode()).hexdigest()[:8]
+            old_hash_short = hashlib.md5(dedup_key_old.encode()).hexdigest()[:8]
+            mode_tag = "NEW" if USE_NEW_DEDUP_KEY else "OLD"
+            print(f"[GATE_B] sym={symbol:<14} seq={seq_id} new={new_hash_short} old={old_hash_short} mode={mode_tag}")
+
             filings.append({
-                "title":    item.get("desc", ""),
-                "company":  item.get("company", ""),
-                "symbol":   item.get("symbol", ""),
-                "category": item.get("attchmntType", ""),
-                "pubdate":  item.get("an_dt", ""),
-                "link":     f"https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={item.get('symbol','')}",
-                "exchange": "NSE",
+                "title":        item.get("desc", ""),
+                "company":      item.get("sm_name", ""),
+                "symbol":       symbol,
+                "category":     item.get("attchmntType", ""),
+                "pubdate":      item.get("an_dt", ""),
+                "link":         source_url,
+                "dedup_key":    active_dedup_key,
+                "exchange":     "NSE",
                 "attchmntFile": item.get("attchmntFile", ""),
             })
         print(f"  Fetched {len(filings)} NSE filings")
@@ -131,7 +159,7 @@ def save_to_supabase(filing, clf):
         "trade_confidence": clf.get("trade_confidence", 0),
         "raw_title": filing.get("title",""),
         "source_url": filing.get("link",""),
-        "url_hash": url_hash(filing.get("link", "")),
+        "url_hash": url_hash(filing.get("dedup_key", "")),
         "published_at": parse_nse_datetime(filing.get("pubdate")),
         "telegram_sent": clf.get("telegram_sent", False)
     }).execute()
@@ -161,7 +189,7 @@ def main():
 
     for i, filing in enumerate(filings[:20]):
         print(f"\n[{i+1}] {filing['title'][:60]}...")
-        if is_duplicate(filing.get("link", "")):
+        if is_duplicate(filing.get("dedup_key", "")):
             print(f"     ⏭️  Already processed — skipping")
             continue
         try:
@@ -276,7 +304,7 @@ def main():
                     )
                     row = (
                         datetime.now(timezone.utc),
-                        url_hash(filing.get("link", "")),
+                        url_hash(filing.get("dedup_key", "")),
                         "NSE_FILING",
                         filing.get("symbol", ""),
                         filing.get("title", ""),
