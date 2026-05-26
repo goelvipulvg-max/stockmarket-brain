@@ -20,7 +20,7 @@ NSE_DATETIME_FORMATS = [
 ]
 
 
-def parse_nse_datetime(date_str: Optional[str]) -> Optional[datetime]:
+def parse_nse_datetime(date_str: Optional[str]) -> Optional[str]:
     """Parse NSE an_dt string to IST timezone-aware datetime.
 
     Args:
@@ -28,12 +28,13 @@ def parse_nse_datetime(date_str: Optional[str]) -> Optional[datetime]:
                   May be None, empty, or malformed - returns None safely.
 
     Returns:
-        Timezone-aware datetime in IST, or None if parse fails.
-        Safe to pass directly to supabase-py for TIMESTAMPTZ columns.
+        ISO 8601 string in IST timezone (e.g. "2026-05-26T12:00:00+05:30"),
+        or None if parse fails. Safe to pass directly to supabase-py
+        for TIMESTAMPTZ columns (supabase-py JSON-serializes strings).
 
     Examples:
         >>> parse_nse_datetime("07-May-2026 14:59:20")
-        datetime(2026, 5, 7, 14, 59, 20, tzinfo=ZoneInfo('Asia/Kolkata'))
+        '2026-05-07T14:59:20+05:30'
 
         >>> parse_nse_datetime("")
         None
@@ -51,7 +52,7 @@ def parse_nse_datetime(date_str: Optional[str]) -> Optional[datetime]:
     for fmt in NSE_DATETIME_FORMATS:
         try:
             naive_dt = datetime.strptime(s, fmt)
-            return naive_dt.replace(tzinfo=IST)
+            return naive_dt.replace(tzinfo=IST).isoformat()
         except ValueError:
             continue
 
