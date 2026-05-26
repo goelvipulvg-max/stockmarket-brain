@@ -32,9 +32,9 @@ DRY_RUN = "--dry-run" in sys.argv
 # ── Trailing stop-loss parameters (all multipliers on entry_price) ──
 EQ_SL_INITIAL  = 0.95
 EQ_T1          = 1.05
-EQ_SL_T1       = 1.03
+EQ_SL_T1       = 1.015
 EQ_T2          = 1.10
-EQ_SL_T2       = 1.06
+EQ_SL_T2       = 1.03
 EQ_T3          = 1.15
 FNO_SL_INITIAL = 0.90
 FNO_T1         = 1.10
