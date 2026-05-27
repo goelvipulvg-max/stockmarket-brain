@@ -5,7 +5,7 @@ This repo contains all code for the StockMarket-Brain personal trading intellige
 ## Architecture
 - 5-tier AI agent hierarchy (Tier-0 to Tier-4)
 - Hybrid strategy (LT 50% + ST 50%)
-- Capital: Rs 5L total (Rs 2.5L LT + Rs 2.5L ST)
+- Capital: Rs 10L total (Rs 5L LT + Rs 5L ST)
 
 ## Key folders
 - agents/ - One Python file per tier
