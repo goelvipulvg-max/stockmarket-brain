@@ -63,6 +63,95 @@ HORIZON_TO_DAYS = {"SHORT": 3, "MEDIUM": 10, "LONG": 30}
 TIER2F_TEST_MODE = os.getenv("TIER2F_TEST_MODE", "false").lower() == "true"
 
 
+# ---------------------------------------------------------------------------
+# Stage 2: AI-Driven SL (Path C Hybrid) - DORMANT in Commit 1
+# SL is validated/clamped from AI consensus and used live; Target is
+# shadow-logged only (fixed T1/T2/T3 ladder still drives exits).
+# Activated later by flipping USE_AI_SL=true in tier0-agent.yml (Commit 3).
+# While USE_AI_SL is false, production behaviour is unchanged.
+# ---------------------------------------------------------------------------
+USE_AI_SL = os.getenv("USE_AI_SL", "false").strip().lower() == "true"
+
+# Safety guardrails (percentages; long-only assumption for now)
+SL_FLOOR_PCT = 2.0                # tightest allowed SL distance
+SL_CAP_PCT = 10.0                 # widest allowed SL distance
+TARGET_FLOOR_PCT = 2.0            # smallest worthwhile target distance
+TARGET_HALLUCINATION_PCT = 50.0   # target beyond this is treated as garbage
+RR_FLOOR = 1.5                    # minimum reward:risk ratio
+
+
+def validate_ai_signal(entry_price, ai_sl_price, ai_target_price):
+    """Validate a single (already-blended) AI SL/Target suggestion for a LONG position.
+
+    Path C Hybrid: SL is clamped into [SL_FLOOR_PCT, SL_CAP_PCT] and used live;
+    Target is validated only to gate the signal and is shadow-logged, never used
+    to override the fixed T1/T2/T3 ladder.
+
+    Rejection (caller should fall back to fixed SL) happens when:
+      - target distance is hallucinated (> TARGET_HALLUCINATION_PCT), or
+      - target distance is below TARGET_FLOOR_PCT, or
+      - reward:risk on the clamped SL is below RR_FLOOR.
+
+    Assumes a LONG position: ai_sl_price < entry_price < ai_target_price.
+    Consensus blending of Haiku + DeepSeek happens upstream (Commit 2).
+
+    Returns dict: accepted, validated_sl_price, validated_target_price,
+    sl_pct, target_pct, rr, clamp_applied, rejection_reason.
+    """
+    result = {
+        "accepted": False,
+        "validated_sl_price": None,
+        "validated_target_price": None,
+        "sl_pct": None,
+        "target_pct": None,
+        "rr": None,
+        "clamp_applied": False,
+        "rejection_reason": None,
+    }
+
+    if not entry_price or entry_price <= 0:
+        result["rejection_reason"] = "invalid_entry_price"
+        return result
+    if not ai_sl_price or ai_sl_price <= 0:
+        result["rejection_reason"] = "invalid_sl_price"
+        return result
+    if not ai_target_price or ai_target_price <= 0:
+        result["rejection_reason"] = "invalid_target_price"
+        return result
+    if ai_sl_price >= entry_price:
+        result["rejection_reason"] = "sl_not_below_entry"
+        return result
+    if ai_target_price <= entry_price:
+        result["rejection_reason"] = "target_not_above_entry"
+        return result
+
+    sl_pct = (entry_price - ai_sl_price) / entry_price * 100.0
+    target_pct = (ai_target_price - entry_price) / entry_price * 100.0
+    result["target_pct"] = round(target_pct, 4)
+
+    if target_pct > TARGET_HALLUCINATION_PCT:
+        result["rejection_reason"] = "target_hallucination"
+        return result
+    if target_pct < TARGET_FLOOR_PCT:
+        result["rejection_reason"] = "target_below_floor"
+        return result
+
+    clamped_sl_pct = min(max(sl_pct, SL_FLOOR_PCT), SL_CAP_PCT)
+    result["clamp_applied"] = abs(clamped_sl_pct - sl_pct) > 1e-9
+    result["sl_pct"] = round(clamped_sl_pct, 4)
+
+    rr = target_pct / clamped_sl_pct
+    result["rr"] = round(rr, 4)
+    if rr < RR_FLOOR:
+        result["rejection_reason"] = "rr_below_floor"
+        return result
+
+    result["validated_sl_price"] = round(entry_price * (1 - clamped_sl_pct / 100.0), 2)
+    result["validated_target_price"] = round(ai_target_price, 2)
+    result["accepted"] = True
+    return result
+
+
 def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     """10-step pipeline: context gathering -> AI consensus -> sizing -> trade insert.
 
