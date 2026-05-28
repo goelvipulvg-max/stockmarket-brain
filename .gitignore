@@ -59,6 +59,8 @@ node_modules/
 tmp/
 temp/
 reports/
+dumps/
+.commit_msg.tmp
 
 # Data files (commit only sample/seed data, not full datasets)
 data/raw/
