@@ -210,7 +210,7 @@ def main():
             supabase.table("filings_log")
             .select("event_type,summary,material_score")
             .eq("symbol", ticker_base)
-            .order("published_at", desc=True)
+            .order("classified_at", desc=True)
             .limit(3)
             .execute()
             .data
