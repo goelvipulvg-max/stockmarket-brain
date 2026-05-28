@@ -32,4 +32,6 @@ jobs:
           echo "TELEGRAM_TIER3_CHANNEL=${{ secrets.TELEGRAM_TIER3_CHANNEL }}" >> .env
           echo "NEON_CONNECTION_STRING=${{ secrets.NEON_CONNECTION_STRING }}" >> .env
       - name: Run Tier-2F
+        env:
+          USE_AI_SL: "true"
         run: python -m agents.tier2_fundamental --filing-id ${{ inputs.filing_id }}

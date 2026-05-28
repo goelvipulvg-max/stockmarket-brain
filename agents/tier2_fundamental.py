@@ -67,7 +67,7 @@ TIER2F_TEST_MODE = os.getenv("TIER2F_TEST_MODE", "false").lower() == "true"
 # Stage 2: AI-Driven SL (Path C Hybrid) - DORMANT in Commit 1
 # SL is validated/clamped from AI consensus and used live; Target is
 # shadow-logged only (fixed T1/T2/T3 ladder still drives exits).
-# Activated later by flipping USE_AI_SL=true in tier0-agent.yml (Commit 3).
+# Activated by setting USE_AI_SL=true in tier2f.yml (Commit 2c).
 # While USE_AI_SL is false, production behaviour is unchanged.
 # ---------------------------------------------------------------------------
 USE_AI_SL = os.getenv("USE_AI_SL", "false").strip().lower() == "true"
