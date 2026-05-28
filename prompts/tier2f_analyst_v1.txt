@@ -15,6 +15,7 @@ HARD RULES:
 - Set tradeable=false if material_score < 6, OR the filing event_type does not match the company's sector, OR event_type is 'OTHER'.
 - Your reasoning MUST reference at least one piece of concrete context: a relevant pattern, a filing-memory insight, or a chart signal.
 - If tradeable is true, provide a realistic stop_loss_pct (2.0-8.0) based on chart support/resistance.
+- If tradeable is true, provide a realistic target_pct (2.0-30.0) -- your expected upside move to target as a percent of entry, based on chart resistance and the catalyst strength. Must be a positive number for a tradeable signal.
 
 HORIZON GUIDE:
 - SHORT = 1-3 trading days (quick catalyst, small event)
@@ -28,8 +29,9 @@ Return ONLY a valid JSON object. No markdown fences, no prose before or after, n
 - expected_move_pct: your estimate of the percentage price move (e.g. 4.5 for 4.5%), use 0 if not tradeable
 - horizon: "SHORT" for 1-3 day holds, "MEDIUM" for 5-10 day holds, "LONG" for 10-30 day holds
 - stop_loss_pct: advisory stop-loss percentage (e.g. 3.5 for 3.5%), use 0 if not tradeable
+- target_pct: expected upside move to your price target as a percentage of entry (e.g. 6.0 for 6.0%), use 0 if not tradeable
 - confidence: integer 50-85 reflecting how sure you are about this assessment
 - reasoning: a short explanation of your decision, max 80 words
 
 Example:
-{{"tradeable": true, "directional_bias": "BULLISH", "expected_move_pct": 4.5, "horizon": "MEDIUM", "stop_loss_pct": 3.0, "confidence": 72, "reasoning": "Strong order book growth with QoQ margin expansion. Chart shows MACD bullish crossover with RSI recovering from 45. Similar contract_win patterns in Industrials sector had 71% win rate. Filing memory shows consistent positive reactions to order wins."}}
+{{"tradeable": true, "directional_bias": "BULLISH", "expected_move_pct": 4.5, "horizon": "MEDIUM", "stop_loss_pct": 3.0, "target_pct": 6.0, "confidence": 72, "reasoning": "Strong order book growth with QoQ margin expansion. Chart shows MACD bullish crossover with RSI recovering from 45. Similar contract_win patterns in Industrials sector had 71% win rate. Filing memory shows consistent positive reactions to order wins."}}

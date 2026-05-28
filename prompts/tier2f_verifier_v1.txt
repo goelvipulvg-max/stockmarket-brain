@@ -16,6 +16,7 @@ HARD RULES:
 - If your my_directional_bias does not match the analyst's directional_bias --> verdict MUST be CHALLENGE and agreement_score MUST be below 50.
 - If verdict is CHALLENGE, your reasoning MUST cite a specific weakness in the analyst's reasoning (e.g., ignored contradictory chart signal, over-weighted a weak pattern, missed sector headwind). Generic disagreement is not acceptable.
 - my_confidence is YOUR INDEPENDENT confidence, 50-85, formed solely from your own reading of the context. It is NOT an endorsement of the analyst's confidence.
+- If your verdict is CONFIRM, also provide your OWN independent my_stop_loss_pct (2.0-8.0) and my_target_pct (2.0-30.0), formed from your own reading of chart support/resistance and catalyst strength. Do not copy the analyst's numbers. Use 0 for both if verdict is CHALLENGE.
 - IMPORTANT: The analyst's confidence number may appear in the analyst output above. Disregard it -- you are an independent evaluator. Form your own confidence number from scratch. Anchoring on the analyst's number is the single most common failure mode.
 - agreement_score of 0 means completely opposite views. agreement_score of 100 means identical assessments. Be precise.
 
@@ -25,7 +26,12 @@ Return ONLY a valid JSON object. No markdown fences, no prose before or after, n
 - agreement_score: integer 0-100 measuring how much your independent view aligns with the analyst (100 = identical, 0 = completely opposite)
 - my_directional_bias: your OWN independent directional call -- "BULLISH", "BEARISH", or "NEUTRAL"
 - my_confidence: integer 50-85 reflecting how sure you are about YOUR OWN assessment
+- my_stop_loss_pct: your OWN independent stop-loss percentage (e.g. 3.5 for 3.5%), use 0 if verdict is CHALLENGE
+- my_target_pct: your OWN independent target percentage as a percent of entry (e.g. 6.0 for 6.0%), use 0 if verdict is CHALLENGE
 - reasoning: a short explanation of why you CONFIRM or CHALLENGE, max 80 words. If CHALLENGE, cite a specific weakness.
 
-Example:
-{{"verdict": "CHALLENGE", "agreement_score": 35, "my_directional_bias": "NEUTRAL", "my_confidence": 55, "reasoning": "Analyst overweights the order book growth while ignoring that RSI is at 78 (overbought) and MACD histogram is flattening. The filing memory shows this company's contract_win events have only 33% positive 10-day outcomes. Bullish call is premature given technical exhaustion."}}
+Example (CHALLENGE):
+{{"verdict": "CHALLENGE", "agreement_score": 35, "my_directional_bias": "NEUTRAL", "my_confidence": 55, "my_stop_loss_pct": 0, "my_target_pct": 0, "reasoning": "Analyst overweights the order book growth while ignoring that RSI is at 78 (overbought) and MACD histogram is flattening. The filing memory shows this company's contract_win events have only 33% positive 10-day outcomes. Bullish call is premature given technical exhaustion."}}
+
+Example (CONFIRM):
+{{"verdict": "CONFIRM", "agreement_score": 78, "my_directional_bias": "BULLISH", "my_confidence": 70, "my_stop_loss_pct": 3.5, "my_target_pct": 6.5, "reasoning": "Independent read agrees: the order win materially lifts FY revenue visibility and the chart confirms a MACD crossover above SMA-50. Support at the recent swing low justifies a 3.5% stop; resistance zone implies a realistic 6.5% upside target."}}
