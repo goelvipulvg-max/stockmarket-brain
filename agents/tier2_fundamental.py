@@ -329,11 +329,55 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     # --- Entry from chart ---
     entry = context["chart_snapshot"]["last_close"]
 
+    # --- Stage 2: AI-Driven SL eligibility + blend (Path C Hybrid, dormant until USE_AI_SL=true) ---
+    # LONG-only; requires both models (no SOLO blend). SL = max-of-SLs (conservative);
+    # target = confidence-weighted average (shadow-logged only, never overrides the ladder).
+    ai_sl_eligible = bool(
+        USE_AI_SL
+        and fallback_mode is None
+        and direction == "BUY"
+        and haiku_output.get("stop_loss_pct") and haiku_output.get("target_pct")
+        and flash_output.get("my_stop_loss_pct") and flash_output.get("my_target_pct")
+    )
+    ai_sl_validation = None
+    ai_sl_used = False
+    blend_method = None
+    blended_inputs = None
+    if ai_sl_eligible:
+        h_sl = float(haiku_output["stop_loss_pct"])
+        f_sl = float(flash_output["my_stop_loss_pct"])
+        h_tgt = float(haiku_output["target_pct"])
+        f_tgt = float(flash_output["my_target_pct"])
+        h_conf = float(haiku_output["confidence"])
+        f_conf = float(flash_output["my_confidence"])
+        blended_sl_pct = max(h_sl, f_sl)
+        conf_sum = h_conf + f_conf
+        blended_target_pct = (h_tgt * h_conf + f_tgt * f_conf) / conf_sum if conf_sum else (h_tgt + f_tgt) / 2
+        blend_method = "sl_max_target_confwavg_v1"
+        blended_inputs = {
+            "h_sl": h_sl, "f_sl": f_sl,
+            "h_target": h_tgt, "f_target": f_tgt,
+            "h_conf": h_conf, "f_conf": f_conf,
+            "blended_sl_pct": round(blended_sl_pct, 4),
+            "blended_target_pct": round(blended_target_pct, 4),
+        }
+        ai_sl_price = round(entry * (1 - blended_sl_pct / 100.0), 2)
+        ai_target_price = round(entry * (1 + blended_target_pct / 100.0), 2)
+        ai_sl_validation = validate_ai_signal(entry, ai_sl_price, ai_target_price)
+        print(f"[STAGE 9: ai_sl] eligible, blended_sl_pct={blended_sl_pct:.2f}, blended_target_pct={blended_target_pct:.2f}, accepted={ai_sl_validation['accepted']}, reason={ai_sl_validation['rejection_reason']}")
+
     # --- Generate canonical targets + stop_loss ---
     targets = generate_targets(entry_price=entry, direction=direction, conviction=conviction)
     t1, t2, t3 = targets["t1"], targets["t2"], targets["t3"]
     t4 = targets.get("t4")       # only present when conviction="HIGH"; goes into raw_signal JSONB
     sl = targets["stop_loss"]
+
+    # --- Stage 2: apply AI-validated SL if accepted (Path C: SL live, target shadow-only) ---
+    ladder_sl_price = sl
+    if ai_sl_eligible and ai_sl_validation and ai_sl_validation["accepted"]:
+        sl = ai_sl_validation["validated_sl_price"]
+        ai_sl_used = True
+        print(f"[STAGE 9: ai_sl] OVERRIDE applied -> sl={sl:.2f} (ladder was {ladder_sl_price:.2f})")
 
     print(f"[STAGE 9: sizing] entry={entry:.2f}, sl={sl:.2f}, t1={t1:.2f}, t2={t2:.2f}, t3={t3:.2f}, conviction={conviction}, avg_conf={avg_conf:.0f}")
 
@@ -399,6 +443,11 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
             "conviction": conviction,
             "avg_conf": avg_conf,
             "analyst_sl_pct_advisory": analyst_sl_pct,
+            "ladder_sl_price": round(ladder_sl_price, 2),
+            "ai_sl_validation": ai_sl_validation,
+            "ai_sl_used": ai_sl_used,
+            "blend_method": blend_method,
+            "blended_inputs": blended_inputs,
             "t4_price": round(t4, 2) if t4 else None,
             "context_summary": {
                 "sector": context["sector"],
