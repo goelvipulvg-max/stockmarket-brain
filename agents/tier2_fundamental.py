@@ -18,6 +18,7 @@ from utils.fno_ban_list import is_in_ban
 from utils.neon_fundamentals import get_fundamentals
 from utils.yfinance_chart import get_chart_snapshot
 from utils.price_structure import compute_price_structure, validate_price_structure
+from utils.volume_structure import compute_volume_structure, validate_volume_structure
 from utils.reward_risk import RR_FLOOR
 from utils.filing_memory_brief import get_filing_memory_brief
 from utils.pattern_insights_retriever import get_relevant_patterns
@@ -68,6 +69,11 @@ TIER2F_TEST_MODE = os.getenv("TIER2F_TEST_MODE", "false").lower() == "true"
 # structure is computed + shadow-logged + fed to the LLM, but NEVER skips a
 # filing. Flip true (tier2f.yml) only after the B2 backtest validates the rule.
 USE_PRICE_STRUCTURE_GATE = os.getenv("USE_PRICE_STRUCTURE_GATE", "false").strip().lower() == "true"
+
+# Dormant volume-confirmation gate (reliability-gap #3). While false, volume is
+# computed + shadow-logged + fed to the LLM, but NEVER skips a filing. Flip true
+# (tier2f.yml) only after the B2 backtest validates the rule.
+USE_VOLUME_GATE = os.getenv("USE_VOLUME_GATE", "false").strip().lower() == "true"
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +239,20 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
             return {"skip": "price_structure", "structure": structure, "gate": gate}
         print("[STAGE 4b: price_structure] gate FAILED but TIER2F_TEST_MODE=true -- BYPASSING skip for testing")
 
+    # --- Step 4c: Volume confirmation (active context; DORMANT gate) ---
+    vol_structure = compute_volume_structure(chart)
+    vol_gate = validate_volume_structure(vol_structure)
+    print(
+        f"[STAGE 4c: volume] vol_vs_avg_ratio={vol_structure['vol_vs_avg_ratio']}, "
+        f"avg_volume_20d={vol_structure['avg_volume_20d']}, "
+        f"volume_spike={vol_structure['volume_spike']}, "
+        f"gate_passes={vol_gate['passes']}, reasons={vol_gate['reasons']}"
+    )
+    if USE_VOLUME_GATE and not vol_gate["passes"]:
+        if not TIER2F_TEST_MODE:
+            return {"skip": "volume_confirmation", "volume_structure": vol_structure, "gate": vol_gate}
+        print("[STAGE 4c: volume] gate FAILED but TIER2F_TEST_MODE=true -- BYPASSING skip for testing")
+
     # --- Step 5a: Relevant patterns from pattern_insights ---
     patterns = get_relevant_patterns(filing["event_type"], fundamentals["sector"], limit=3)
     print(f"[STAGE 5a: patterns] event_type={filing['event_type']}, sector={fundamentals['sector']}, found={len(patterns)}")
@@ -260,6 +280,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
             "resistance": chart["resistance"],
         },
         "price_structure": structure,
+        "volume_structure": vol_structure,
         "nifty_mood": nifty_mood,
         "relevant_patterns": patterns,
         "filing_memory_brief": memory,
