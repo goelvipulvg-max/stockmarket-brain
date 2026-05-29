@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from utils.supabase_client import get_client
 from utils.telegram_client import send_message as tg_send
 from utils import questdb_client
+from utils.reward_risk import passes_rr_floor
 
 # --- Session ---
 _session = curl_requests.Session(impersonate="chrome124")
@@ -198,15 +199,25 @@ def main():
                 continue
             signal = get_signal(data)
             print(f"{ticker}: {signal['signal']} | Confidence: {signal['confidence']}")
+            # NOTE: this classic Tier-2 path is a DORMANT orphan -- no GitHub Actions
+            # workflow invokes it (manual run only). The RR floor gate below therefore
+            # has no live production impact today; it is reusable correctness hygiene.
             if signal["signal"] != "HOLD":
-                log_paper_trade(data, signal)
-                log_signal_questdb(data, signal)
+                verdict = passes_rr_floor(
+                    signal.get("entry"), signal.get("stop_loss"),
+                    signal.get("target"), signal["signal"],
+                )
+                if not verdict["passed"]:
+                    print(f"  -> RR gate FAILED ({verdict['reason']}, rr={verdict['rr']}) -- skipping persistence")
+                else:
+                    log_paper_trade(data, signal)
+                    log_signal_questdb(data, signal)
 
-            if signal["confidence"] >= SCORE_THRESHOLD and signal["signal"] != "HOLD":
-                msg = format_message(data, signal)
-                tg_send(TELEGRAM_BOT_TOKEN, TELEGRAM_SWING_CHANNEL, msg)
-                posted += 1
-                print(f"  -> Posted [OK]")
+                    if signal["confidence"] >= SCORE_THRESHOLD:
+                        msg = format_message(data, signal)
+                        tg_send(TELEGRAM_BOT_TOKEN, TELEGRAM_SWING_CHANNEL, msg)
+                        posted += 1
+                        print(f"  -> Posted [OK]")
         except Exception as e:
             import traceback
             traceback.print_exc()

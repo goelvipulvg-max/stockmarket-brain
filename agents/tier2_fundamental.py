@@ -18,6 +18,7 @@ from utils.fno_ban_list import is_in_ban
 from utils.neon_fundamentals import get_fundamentals
 from utils.yfinance_chart import get_chart_snapshot
 from utils.price_structure import compute_price_structure, validate_price_structure
+from utils.reward_risk import RR_FLOOR
 from utils.filing_memory_brief import get_filing_memory_brief
 from utils.pattern_insights_retriever import get_relevant_patterns
 from utils.ai_consensus import run_analyst, run_verifier, determine_consensus
@@ -83,7 +84,7 @@ SL_FLOOR_PCT = 2.0                # tightest allowed SL distance
 SL_CAP_PCT = 10.0                 # widest allowed SL distance
 TARGET_FLOOR_PCT = 2.0            # smallest worthwhile target distance
 TARGET_HALLUCINATION_PCT = 50.0   # target beyond this is treated as garbage
-RR_FLOOR = 1.5                    # minimum reward:risk ratio
+# RR_FLOOR imported from utils.reward_risk -- single source of truth (gap #5)
 
 
 def validate_ai_signal(entry_price, ai_sl_price, ai_target_price):
