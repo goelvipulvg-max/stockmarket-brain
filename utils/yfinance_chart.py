@@ -49,6 +49,18 @@ def get_chart_snapshot(ticker: str) -> dict:
     sma_50 = float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
     sma_200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
 
+    # Volume (latest + raw series) -- reliability-gap #3. Defensive: any problem
+    # degrades to None / [] rather than raising, so an index like ^NSEI (which may
+    # lack or zero-fill Volume) never breaks the snapshot or the NIFTY-mood gate.
+    try:
+        volume_series = [float(x) for x in df["Volume"].values]
+        latest_vol = volume_series[-1] if volume_series else None
+        if latest_vol is not None and latest_vol != latest_vol:  # NaN
+            latest_vol = None
+    except Exception:
+        latest_vol = None
+        volume_series = []
+
     # Trend — SMA-based, explicit INSUFFICIENT_DATA when SMAs unavailable
     if sma_50 is None or sma_200 is None or pd.isna(sma_50) or pd.isna(sma_200):
         trend = "INSUFFICIENT_DATA"
@@ -71,5 +83,7 @@ def get_chart_snapshot(ticker: str) -> dict:
         "trend": trend,
         "support": support,
         "resistance": resistance,
+        "volume": latest_vol,
+        "volume_series": volume_series,
         "close_series": [float(x) for x in close.values],
     }
