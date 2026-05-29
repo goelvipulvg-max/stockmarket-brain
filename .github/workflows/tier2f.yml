@@ -35,4 +35,5 @@ jobs:
         env:
           USE_AI_SL: "true"
           USE_PRICE_STRUCTURE_GATE: "false"
+          USE_VOLUME_GATE: "false"
         run: python -m agents.tier2_fundamental --filing-id ${{ inputs.filing_id }}
