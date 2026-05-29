@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from utils.fno_ban_list import is_in_ban
 from utils.neon_fundamentals import get_fundamentals
 from utils.yfinance_chart import get_chart_snapshot
+from utils.price_structure import compute_price_structure, validate_price_structure
 from utils.filing_memory_brief import get_filing_memory_brief
 from utils.pattern_insights_retriever import get_relevant_patterns
 from utils.ai_consensus import run_analyst, run_verifier, determine_consensus
@@ -61,6 +62,11 @@ HORIZON_TO_DAYS = {"SHORT": 3, "MEDIUM": 10, "LONG": 30}
 
 # Test-mode bypass for stage 4 (NIFTY mood) -- production must NEVER set this.
 TIER2F_TEST_MODE = os.getenv("TIER2F_TEST_MODE", "false").lower() == "true"
+
+# Dormant stock-level price-structure gate (reliability-gap #1). While false,
+# structure is computed + shadow-logged + fed to the LLM, but NEVER skips a
+# filing. Flip true (tier2f.yml) only after the B2 backtest validates the rule.
+USE_PRICE_STRUCTURE_GATE = os.getenv("USE_PRICE_STRUCTURE_GATE", "false").strip().lower() == "true"
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +197,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     print(f"[STAGE 3: chart] symbol={symbol}, last_close={chart.get('last_close')}, trend={chart.get('trend')}")
 
     # --- Step 4: NIFTY mood ---
+    nifty_chart = None
     try:
         nifty_chart = get_chart_snapshot("^NSEI")
         nifty_close = nifty_chart["last_close"]
@@ -210,6 +217,20 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
         if not TIER2F_TEST_MODE:
             return {"skip": "nifty_bearish", "nifty_mood": nifty_mood}
         print(f"[STAGE 4: nifty_mood] mood=BEARISH but TIER2F_TEST_MODE=true -- BYPASSING skip for testing")
+
+    # --- Step 4b: Stock-level price structure (active context; DORMANT gate) ---
+    structure = compute_price_structure(chart, nifty_chart)
+    gate = validate_price_structure(structure)
+    print(
+        f"[STAGE 4b: price_structure] above_sma50={structure['above_sma50']}, "
+        f"pct_from_52wk_high={structure['pct_from_52wk_high']}, "
+        f"rs_vs_nifty_63d={structure['rs_vs_nifty_63d']}, "
+        f"gate_passes={gate['passes']}, reasons={gate['reasons']}"
+    )
+    if USE_PRICE_STRUCTURE_GATE and not gate["passes"]:
+        if not TIER2F_TEST_MODE:
+            return {"skip": "price_structure", "structure": structure, "gate": gate}
+        print("[STAGE 4b: price_structure] gate FAILED but TIER2F_TEST_MODE=true -- BYPASSING skip for testing")
 
     # --- Step 5a: Relevant patterns from pattern_insights ---
     patterns = get_relevant_patterns(filing["event_type"], fundamentals["sector"], limit=3)
@@ -232,9 +253,12 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
             "macd_signal": chart["macd_signal"],
             "macd_hist": chart["macd_hist"],
             "trend": chart["trend"],
+            "sma_50": chart["sma_50"],
+            "sma_200": chart["sma_200"],
             "support": chart["support"],
             "resistance": chart["resistance"],
         },
+        "price_structure": structure,
         "nifty_mood": nifty_mood,
         "relevant_patterns": patterns,
         "filing_memory_brief": memory,
