@@ -13,10 +13,17 @@ def calculate_position_size(
 ) -> Tuple[int, float]:
     """Risk-based position sizing. Returns (quantity, position_size_rs) or (0, 0).
 
-    Constraints (all non-negotiable):
-      - Risk 2% of total equity per trade
-      - Never exceed 12% of equity in a single trade
-      - Always keep >=20% cash buffer
+    Constraints (values reflect the constants below; see TODO):
+      - Risk RISK_PCT (0.125%) of total equity per trade
+      - Never exceed MAX_TRADE_PCT (2.5%) of equity in a single trade
+        (this cap is the binding constraint in practice)
+      - Always keep >= MIN_CASH_BUFFER (20%) cash buffer
+
+    TODO(owner): this docstring previously stated "Risk 2%" and "Never exceed 12%",
+    which do NOT match the constants (0.125% / 2.5%). Values are left UNCHANGED per
+    instruction. Confirm whether 0.125% risk and 2.5% max-trade are intentional
+    (e.g. sized for ~16 parallel positions -- no rationale is documented anywhere)
+    or stale and should be revised.
     """
     RISK_PCT = 0.00125
     MAX_TRADE_PCT = 0.025
