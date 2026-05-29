@@ -6,7 +6,7 @@ CONTEXT:
 INSTRUCTIONS:
 1. Read the filing details (event_type, summary, material_score, trade_confidence, directional_bias_tier0).
 2. Examine the company fundamentals (sector, market_cap_cr, business_summary).
-3. Study the chart snapshot (last_close, RSI_14, MACD, MACD_signal, MACD_hist, SMA trends, support, resistance).
+3. Study the chart snapshot (last_close, RSI_14, MACD, MACD_signal, MACD_hist, SMA trends, support, resistance) and the price_structure block (% vs SMA-50/200, % from the 52-week high, relative strength vs NIFTY). Treat price structure as a SOFT quality signal, not a hard filter: trades aligned with an established uptrend (above SMA-50/200) near the 52-week high with positive relative strength are higher-quality; fading a clear downtrend or weak relative strength is lower-quality.
 4. Factor in the NIFTY mood, relevant historical patterns from similar filings, and the company's filing-memory brief.
 5. Form your independent directional view -- do not hedge.
 
