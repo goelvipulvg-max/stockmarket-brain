@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 load_dotenv(override=True)
 from utils.supabase_client import get_client
+from utils.expectancy import compute_expectancy, MIN_EXPECTANCY_N
 
 IST = ZoneInfo("Asia/Kolkata")
 MIN_SAMPLES = 3
@@ -78,6 +79,43 @@ def format_memory_text(stats: dict, date_str: str) -> str:
             else:
                 lines.append(f"  {direction}: {s['total']}T — insufficient data")
 
+    return "\n".join(lines)
+
+
+def format_expectancy_text(exp: dict, date_str: str) -> str:
+    """Render the portfolio-expectancy block appended to memory_text."""
+    n = exp["n"]
+    lines = [f"=== Portfolio Expectancy (all resolved trades, as of {date_str}) ===", ""]
+    if n == 0:
+        lines.append("No resolved trades yet.")
+        return "\n".join(lines)
+
+    win_rate = f"{exp['win_rate'] * 100:.0f}%" if exp["win_rate"] is not None else "N/A"
+    payoff = f"{exp['payoff_ratio']:.2f}" if exp["payoff_ratio"] is not None else "N/A"
+    avg_win = f"+{exp['avg_win_pct']:.2f}%" if exp["avg_win_pct"] is not None else "N/A"
+    avg_loss = f"-{exp['avg_loss_pct']:.2f}%" if exp["avg_loss_pct"] is not None else "N/A"
+    exp_pct = f"{exp['expectancy_pct']:+.2f}%" if exp["expectancy_pct"] is not None else "N/A"
+
+    lines.append(f"Resolved: {n}  (W:{exp['n_win']} L:{exp['n_loss']} BE:{exp['n_be']})")
+    lines.append(f"Win rate: {win_rate}   Payoff (avgW/avgL): {payoff}")
+    lines.append(f"Avg win: {avg_win}   Avg loss: {avg_loss}")
+    lines.append(f"Expectancy: {exp_pct} per trade")
+
+    if exp["expectancy_rs"] is not None:
+        lines.append(f"Expectancy (Rs): {exp['expectancy_rs']:+.0f} per trade  [coverage {exp['rs_coverage']}/{n}]")
+    else:
+        lines.append("Expectancy (Rs): N/A (no entry/qty data)")
+
+    if exp["expectancy_in_r"] is not None:
+        lines.append(f"Expectancy (R): {exp['expectancy_in_r']:+.2f}R  [coverage {exp['r_coverage']}/{n}]")
+    else:
+        lines.append("Expectancy (R): N/A (no SL data)")
+
+    if exp["preliminary"]:
+        lines.append(f"(!) preliminary -- low sample (n={n} < {MIN_EXPECTANCY_N})")
+
+    lines.append("")
+    lines.append("(Scope: all resolved paper_trades. The win-rate breakdown above is Tier-3-approved only.)")
     return "\n".join(lines)
 
 
@@ -157,6 +195,19 @@ def main():
 
     stats = compute_stats(trades)
     memory_text = format_memory_text(stats, today_str)
+
+    # --- Portfolio expectancy: ALL resolved paper_trades (true portfolio scope) ---
+    resolved_rows = (
+        supabase.table("paper_trades")
+        .select("pnl_pct,entry_price,stop_loss,quantity,direction,status")
+        .in_("status", ["TARGET_HIT", "SL_HIT", "EXPIRED"])
+        .execute()
+        .data
+    )
+    resolved = [r for r in resolved_rows if r.get("pnl_pct") is not None]
+    print(f"Resolved paper_trades (expectancy scope): {len(resolved)}")
+    exp = compute_expectancy(resolved)
+    memory_text = memory_text + "\n\n" + format_expectancy_text(exp, today_str)
 
     supabase.table("trade_memory").upsert(
         {
