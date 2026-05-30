@@ -85,7 +85,7 @@ def format_memory_text(stats: dict, date_str: str) -> str:
 def format_expectancy_text(exp: dict, date_str: str) -> str:
     """Render the portfolio-expectancy block appended to memory_text."""
     n = exp["n"]
-    lines = [f"=== Portfolio Expectancy (all resolved trades, as of {date_str}) ===", ""]
+    lines = [f"=== Portfolio Expectancy (live TIER2F resolved trades, as of {date_str}) ===", ""]
     if n == 0:
         lines.append("No resolved trades yet.")
         return "\n".join(lines)
@@ -127,7 +127,7 @@ def format_expectancy_text(exp: dict, date_str: str) -> str:
         lines.append(f"(!) preliminary -- low sample (n={n} < {MIN_EXPECTANCY_N})")
 
     lines.append("")
-    lines.append("(Scope: all resolved paper_trades. The win-rate breakdown above is Tier-3-approved only.)")
+    lines.append("(Scope: resolved source='TIER2F' paper_trades only. The win-rate breakdown above is Tier-3-approved only.)")
     return "\n".join(lines)
 
 
@@ -163,10 +163,14 @@ def main():
     stats = compute_stats(trades)
     memory_text = format_memory_text(stats, today_str)
 
-    # --- Portfolio expectancy: ALL resolved paper_trades (true portfolio scope) ---
+    # --- Portfolio expectancy: live TIER2F resolved paper_trades only ---
+    # Scoped to source='TIER2F' so the headline reflects the live engine, not the
+    # 33 dormant legacy source='TIER2' classic-path trades (NULL quantity, orphan
+    # path) that would otherwise pool in and mislead from the very first resolve.
     resolved_rows = (
         supabase.table("paper_trades")
         .select("pnl_pct,entry_price,exit_price,stop_loss,quantity,direction,status")
+        .eq("source", "TIER2F")
         .in_("status", ["TARGET_HIT", "SL_HIT", "EXPIRED"])
         .execute()
         .data
