@@ -78,3 +78,6 @@ htmlcov/
 
 # IDE (additional)
 *.code-workspace
+
+# Secrets — never track
+agents/Keys.txt
