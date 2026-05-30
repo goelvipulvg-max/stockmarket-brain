@@ -1,8 +1,8 @@
 """Portfolio expectancy metrics (pure computation, no I/O).
 
 Computes win-rate, payoff ratio, and expectancy (%, Rs, and R-multiple) from a
-list of resolved paper_trades rows. Reused by tier4_memory_manager and
-backtest_analysis so the maths lives in one place.
+list of resolved paper_trades rows. The only caller is tier4_memory_manager;
+scripts/backtest_analysis.py does its own inline pnl math and does not use this.
 
 Win/loss is classified by pnl_pct SIGN (not status) so EXPIRED trades that
 closed +/- are counted correctly. The status-based win-rate breakdown lives
