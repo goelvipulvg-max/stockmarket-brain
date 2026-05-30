@@ -38,7 +38,7 @@ Rank order in the report is by leverage (impact × tractability), not by the ord
 **Question:** Is a minimum reward:risk enforced before a trade is taken, and is it honest about costs?
 **How to check here:** Verify `utils/reward_risk.py` (line ~18) enforces `RR_FLOOR` (= 1.5) and that the R:R is computed on net (post-cost) targets, not gross. Confirm the AI-SL blend rule holds: SL = max-of-SLs (conservative), target = confidence-weighted average, within `SL_FLOOR_PCT` (2%) / `SL_CAP_PCT` (10%) / `TARGET_FLOOR_PCT` (2%) / hallucination bounds (all in `agents/tier2_fundamental.py`). Position sizing lives in `utils/position_sizer.py` as `RISK_PCT` (0.00125 = 0.125%) and `MAX_TRADE_PCT` (0.025 = 2.5%).
 **Signals:** R:R computed on gross targets quietly violates the real floor once costs are subtracted.
-**Also flag:** `utils/position_sizer.py`'s docstring still cites the old 0.02 / 0.12 values while the code uses 0.00125 / 0.025 (≈16 positions). Surface this as documentation-vs-code drift so Gaurav can confirm the current values are intentional, not stale — a known pending item.
+**Also check:** confirm `utils/position_sizer.py`'s docstring matches the live `RISK_PCT` / `MAX_TRADE_PCT` constants, and flag **only if they actually diverge** — the earlier 0.02 / 0.12 docstring drift was already fixed in `9d0497c`, so this should normally pass.
 **Score:** PASS = RR_FLOOR enforced on net; WARN = enforced on gross; FAIL = not enforced.
 
 ## 6. Statistical maturity
