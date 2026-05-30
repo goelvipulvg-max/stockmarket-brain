@@ -127,15 +127,20 @@ Follow the branch lifecycle above. Write `reports/auto-research/research-YYYY-MM
 
 Labels, evidence grades, and source links stay in English (facts); only the explanation layer is Hinglish. Reports-only — **"socho, karo mat."**
 
-## Phase 5 — Update memory + hand off (no Telegram in v0)
+## Phase 5 — Update memory + hand off (chat summary + Telegram digest)
 
 - Append one dated line per outcome to `reports/research-history.md` (structure below) on `auto-research` (first run creates it with `git add -f`).
-- **Output a short summary to the chat** (this replaces Telegram for v0): one Hinglish posture line, the top 1–3 surfaced items with evidence grade + a one-line Matlab, and a **full clickable GitHub URL** to the report:
+- **Output a short summary to the chat:** one Hinglish posture line, the top 1–3 surfaced items with evidence grade + a one-line Matlab, and a **full clickable GitHub URL** to the report:
   `https://github.com/goelvipulvg-max/stockmarket-brain/blob/auto-research/reports/auto-research/research-YYYY-MM-DD.md`
   (a bare repo-relative path won't be clickable).
+- **Send the same Hinglish digest to the SMB Research Telegram channel** (in addition to — not instead of — the chat summary above). Reuse the engine's send path exactly as `gap-auditor` does; do **not** reinvent a raw API call:
+  - `from utils.telegram_client import send_message` (it no-ops with a "config missing -- skipping" print if either value is blank, so a missing key never crashes the run).
+  - Read both values from `.env` (`load_dotenv(override=True)`) and call:
+    `send_message(bot_token=os.environ["TELEGRAM_BOT_TOKEN"], chat_id=os.environ["TELEGRAM_RESEARCH_CHANNEL"], text=digest)`.
+    `TELEGRAM_RESEARCH_CHANNEL` is the private "SMB Research" channel id (`-100…`). **Never hardcode the id in this file; never print the token.**
+  - **Digest shape (mirror gap-auditor's, phone-skimmable):** one Hinglish posture line, then each of the top 1–3 **SURFACED** items as a short line with its evidence grade + a one-line "Matlab:", then the report URL. Keep lines short so it skims on a phone.
+  - **Quiet week:** if nothing reached SURFACED, send just the one-line "quiet week" posture (or skip the send) — never manufacture content to fill the message. The report + chat summary remain the source of truth; Telegram is the convenience mirror.
 - Return the working tree to `main`.
-
-*(Telegram to an "SMB Research" channel is a later add — when it exists, send the same digest with a hardcoded chat-id, exactly as `gap-auditor` does with `-1003901507651`.)*
 
 ## research-history.md structure (compounding memory)
 
