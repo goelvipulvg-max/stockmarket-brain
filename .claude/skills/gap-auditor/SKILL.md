@@ -38,10 +38,10 @@ Build a short in-memory "what is already known" list from steps 2–3 before sco
 
 ## Phase 1 — Pull current engine state (read-only)
 
-Query the live stores read-only. **Verify these source names against the actual schema on first run — they are best-known defaults, not confirmed:**
+Query the live stores read-only. **Source mapping below is verified by a read-only connection test (2026-05-30) — trust it over older assumptions:**
 
-- **Supabase** — `paper_trades` (entries, exits, P&L, `quantity`, and a `raw_signal` JSONB blob that holds the AI-SL fields), `filings_log` (raw filing events, tiers, classification; Supabase-managed, no repo schema).
-- **Neon** — the brain/analysis store, especially `filing_memory` (matured market-relative alpha outcomes) and `event_outcomes`.
+- **Supabase** — `paper_trades` (entries, exits, P&L, `quantity`, and a `raw_signal` JSONB blob that holds the AI-SL fields; **RLS is enabled** on this table, so the audit role must have `BYPASSRLS` or it silently reads 0 rows), `filings_log` (raw filing events, tiers, classification; Supabase-managed), and `filing_memory` (matured market-relative alpha outcomes — the maturity-gate signal; lives in the `public` schema on **Supabase, not Neon**).
+- **Neon** — holds `event_outcomes` (the survivorship / base-rate signal).
 - Optionally **QuestDB** for price/volume series if a dimension needs it.
 
 Compute the inputs the rubric needs:
