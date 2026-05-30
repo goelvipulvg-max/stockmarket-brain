@@ -60,3 +60,7 @@ _Compact ledger synthesized from all reports/ docs (reliability-gap report, gap1
 - **B10 weak-inference n≥5** — raise min-n threshold + add statistical-adequacy labeling in `memory_seed.py`?
 - **RELIANCE EPS adjustment** — verify split/bonus adjustment (Mar23 98.59 vs Mar24 51.45) before trusting Upstox EPS
 - **Event-type edge gate** — per event_type keep/up-weight vs drop/down-weight, pending event-study results
+
+## Audit run log
+
+- **2026-05-30** — auto-audit (production, `auto-audit` branch). Top gap: **Cost honesty FAIL** (gross-only P&L). New WATCH: AI-SL canary invisible — 0/36 paper_trades carry `raw_signal.ai_sl_used` despite `USE_AI_SL=true`. Status change: matured `filing_memory` (10d) 25→**35** (still <50, confidence gate ON); RLS now readable (paper_trades 36, filing_memory 805). Report: `reports/auto-audit/auto-audit-2026-05-30.md`.
