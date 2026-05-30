@@ -39,6 +39,19 @@ Research only these three — they compound directly with the auditor's output:
 
 *(Daily market/regime, regulatory scanning, and other-traders lanes are deferred to a later phase. Keep the principle: market/regime info would only ever feed confidence interpretation, never a trade signal.)*
 
+## Scout vs auditor — the boundary test (stay out of the auditor's lane)
+
+The auditor-blind-spots lane (listed third above, called **Lane 6** in Phase 1) sits closest to `gap-auditor`'s territory, so hold a crisp line between the two:
+
+> **TEST:** `gap-auditor` answers *"is our engine wrong / under-measured?"* — a finding about **US**. `research-analyst` answers *"what proven external method closes a KNOWN-open gap?"* — a finding about the **WORLD**. If a candidate would add a **new row** to `audit-history.md`, it's the auditor's job — do **not** research a solution for an ungraded gap.
+
+**Escape valve:** if research *incidentally* surfaces a new engine gap, don't swallow it and don't build a solution for it — **NOTE it as "possible new gap → flag for `gap-auditor`"** and hand it over. Do not adopt it as a research finding. A scout that quietly starts auditing stops being trustworthy at either job.
+
+**Worked examples (grounded in the first run):**
+- ✅ **PASS** — B1 needs survivorship-adjusted data (a known-**PARKED** gap) → surface **bhavcopy point-in-time reconstruction**, an external method that closes it.
+- ✅ **PASS** — the auditor flagged *"two-AI consensus NOT MEASURED"* (a known blind-spot) → surface **Cohen's kappa**, an external metric that fills it.
+- ❌ **FAIL** — *"paper_trades P&L is gross, not net"* → that's **discovering** an engine gap, which belongs to `gap-auditor`. The scout must not surface it as a research finding; at most, hand it over via the escape valve.
+
 ## Cross-branch reads & branch lifecycle (the engine tree is on `main`)
 
 The auditor's latest report and its per-run log do **not** live on `main` — they live on the **`auto-audit`** branch (on `main`, `reports/auto-audit/` is empty and `audit-history.md` is the base ledger only). And this skill writes to its **own** branch, `auto-research`. So:
@@ -89,13 +102,19 @@ Never target SHIPPED / PARKED / AVOID — re-proposing settled work is noise, an
 
 Use your own WebSearch / WebFetch tools, but only within the **source whitelist** (`references/research-rubric.md`). For each candidate finding, apply the research rubric: assign an **evidence grade**, run the **skeptic lenses** on the external claim, and check **fit-to-stack**. Recency-check (don't pass old work as new). Cite the real source or drop it.
 
+**Make the whitelist structural, not aspirational:** every finding's source line must carry **`domain · publication-date`** (e.g. `arxiv.org · 2026-03`). **Off-whitelist domains and stale sources are auto-rejected** unless the reason is explicitly justified in that finding's catch / risk line (rubric §6).
+
 **Bot-blocked official sources:** some official sources (e.g. NSE) block the basic fetch tool. Do NOT drop a legitimate official source just because the simple fetch times out — cite the known official methodology, and if exact figures matter, verify them with a READ-ONLY curl_cffi sidecar (the same cookie-spoofing the engine uses), never a write path.
 
-## Phase 3 — Score, rank, and gate
+## Phase 3 — Score, rank, and gate (into the ledger's own tiers)
 
-- **Worth-it = Relevance × Evidence × Feasibility (fits the stack?) × Novelty (new-to-us).** Only items strong on *all four* surface — a brilliant idea we can't implement, or a proven one we already shipped, doesn't make the report.
-- **Rank** survivors by **leverage = impact × tractability**, so the report leads with what's most worth doing.
-- **Quiet-when-nothing:** if nothing clears the bar, write one honest line saying so and stop.
+Grade each candidate on four axes — **Relevance, Feasibility, Novelty** as **H / M / L**, and **Evidence** as **Proven / Promising / Theory-only / Unverified** (rubric §1) — then sort it into the tier it will occupy in `research-history.md`:
+
+- **SURFACED** *(act on it)* — **Evidence ∈ {Proven, Promising}** AND **Relevance, Feasibility, Novelty all ≥ M.** These lead the report, ranked by **leverage = impact × tractability**.
+- **EXPLORING** *(note, don't act)* — relevant + novel, but **Evidence is mixed / Promising-with-caveats**, OR **Feasibility is uncertain.** Worth a watch line, not a recommendation. *(This is exactly where the first-run PEAD-in-India item correctly landed.)*
+- **DISMISSED** *(drop + log the reason)* — **Unverified**, **off-whitelist**, **already SHIPPED / PARKED / AVOID**, or **doesn't-fit-stack.** Log the reason in `research-history.md` so it never re-surfaces.
+
+These three outcomes map 1:1 onto the `research-history.md` tiers, so scoring and memory share one vocabulary. **Quiet-when-nothing:** if nothing reaches SURFACED, say so in one honest line and stop — an empty SURFACED list is a valid week.
 
 ## Phase 4 — Write the report (`auto-research` branch, NEVER `main`)
 
@@ -103,7 +122,7 @@ Follow the branch lifecycle above. Write `reports/auto-research/research-YYYY-MM
 
 1. **Header** — date, which OPEN gaps / blind-spots were targeted, and a one-line posture (anything high-leverage this week, or a quiet week?).
 2. **Aasaan bhasha mein** — a plain-Hinglish summary placed high: one bottom-line sentence, then each surfaced item's **"Matlab:"** line (beginner-friendly analogy).
-3. **Findings, ranked by leverage** — for each: *What it is → Why it matters (which OPEN gap / blind-spot) → Evidence grade (Proven / Promising / Theory-only / Unverified) → What you'd consider or do (a direction, not a code change) → The catch / risk → Source(s) with links.*
+3. **Findings, ranked by leverage** — for each: *What it is → Why it matters (which OPEN gap / blind-spot) → Evidence grade (Proven / Promising / Theory-only / Unverified) → What you'd consider or do (a direction, not a code change) → The catch / risk → Source(s), each cited as `domain · publication-date` + link.*
 4. **Nothing-worth-it note** — if applicable, state plainly that nothing cleared the bar and why.
 
 Labels, evidence grades, and source links stay in English (facts); only the explanation layer is Hinglish. Reports-only — **"socho, karo mat."**

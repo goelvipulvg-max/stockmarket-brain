@@ -48,11 +48,17 @@ Before surfacing, confirm it isn't already known or settled:
 - Cross-check `research-history.md` (SURFACED / DISMISSED / EXPLORING / ADOPTED) — never re-surface a DISMISSED idea without new evidence.
 - Cross-check `audit-history.md` (SHIPPED / PARKED / AVOID / PENDING) — if the engine already shipped or knowingly parked it, it's not novel.
 
-## 5. The worth-it score
+## 5. The worth-it score → which ledger tier
 
 > **Worth-it = Relevance × Evidence × Feasibility × Novelty**
 
-If any factor is near-zero, the finding doesn't surface — a proven-but-irrelevant paper, a relevant-but-unverified claim, or a great-but-already-shipped idea all fail the gate. Survivors are ranked by **leverage = impact × tractability** in the report.
+If any factor is near-zero, the finding doesn't surface — a proven-but-irrelevant paper, a relevant-but-unverified claim, or a great-but-already-shipped idea all fail the gate.
+
+Make the gate concrete: grade **Relevance / Feasibility / Novelty** as **H / M / L** and **Evidence** on the §1 scale, then sort each candidate into the tier it will occupy in `research-history.md` (so scoring and memory share one vocabulary):
+
+- **SURFACED** — Evidence ∈ {Proven, Promising} AND Relevance, Feasibility, Novelty all ≥ M. Ranked by **leverage = impact × tractability** in the report.
+- **EXPLORING** — relevant + novel, but Evidence is mixed / Promising-with-caveats OR Feasibility is uncertain. Note it; don't act.
+- **DISMISSED** — Unverified, off-whitelist, already SHIPPED / PARKED / AVOID, or doesn't-fit-stack. Log the reason so it never re-surfaces.
 
 ## 6. Source whitelist (strict — cite-or-drop)
 
@@ -64,6 +70,10 @@ If any factor is near-zero, the finding doesn't surface — a proven-but-irrelev
 **Skip (never as primary evidence):** retail forums (Reddit / ValuePickr threads), YouTube gurus, Telegram tip channels, SEO-spam, unsourced blogs.
 
 A surfaced claim with no traceable whitelisted source is a **bug**, not a finding.
+
+**Enforce it structurally (not just as a wish):**
+- Every surfaced finding's source line **must** carry **domain + publication date** — e.g. `arxiv.org · 2026-03`, `sebi.gov.in · 2024-11`. No domain or no date → treat the claim as **Unverified**.
+- **Auto-reject** off-whitelist domains and **stale** sources (a "new" claim resting on old work) — unless the staleness or the source is explicitly justified in that finding's **catch / risk** line.
 
 ## 7. Plain-Hinglish "Matlab:" library (research edition)
 
