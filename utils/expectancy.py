@@ -11,6 +11,8 @@ separately in tier4_memory_manager.compute_stats().
 from statistics import mean
 from typing import Optional
 
+from utils.trade_costs import compute_trade_costs
+
 # Below this many resolved trades, expectancy is shown but flagged preliminary.
 # (A ~55% win-rate at n=20 still carries roughly a +/-20-30% confidence band.)
 MIN_EXPECTANCY_N = 20
@@ -58,6 +60,15 @@ def compute_expectancy(trades: list) -> dict:
         "rs_coverage": 0,
         "expectancy_in_r": None,
         "r_coverage": 0,
+        # --- net-of-cost (gap #7 + B4): additive; gross keys above stay unchanged ---
+        "expectancy_pct_net": None,
+        "expectancy_rs_net": None,
+        "avg_cost_pct": None,
+        "avg_cost_rs": None,
+        "expectancy_pct_gross_cov": None,  # gross over the SAME covered set, for honest net-vs-gross
+        "cost_coverage": 0,
+        "expectancy_in_r_net": None,
+        "r_net_coverage": 0,
         "preliminary": n < MIN_EXPECTANCY_N,
     }
     if n == 0:
@@ -122,5 +133,45 @@ def compute_expectancy(trades: list) -> dict:
     result["r_coverage"] = len(r_values)
     if r_values:
         result["expectancy_in_r"] = mean(r_values)
+
+    # --- Net-of-cost expectancy: subtract exact per-trade DELIVERY round-trip cost ---
+    # Cost is computed DIRECTION-AGNOSTICALLY: compute_trade_costs is statutory-symmetric
+    # (STT/exchange/SEBI/slippage on both legs) and its total_cost_pct uses the entry*qty
+    # base, which matches calc_pnl_pct's entry-normalization for BUY and SELL alike (the
+    # buy-only stamp leg is modelled on entry notional -> sub-rupee skew on shorts).
+    # Rows whose entry/exit/qty are missing/invalid are EXCLUDED -- never assigned cost 0.
+    net_pct, net_rs, cost_pct_list, cost_rs_list, gross_pct_cov = [], [], [], [], []
+    r_net_values = []
+    for t, p in rows:
+        entry = _safe_float(t.get("entry_price"))
+        exit_price = _safe_float(t.get("exit_price"))
+        qty = _safe_float(t.get("quantity"))
+        tc = compute_trade_costs(entry, exit_price, qty)
+        if not tc["valid"]:
+            continue
+        cost_pct = tc["total_cost_pct"]
+        cost_rs = tc["total_cost_rs"]
+        cost_pct_list.append(cost_pct)
+        cost_rs_list.append(cost_rs)
+        gross_pct_cov.append(p)
+        net_pct.append(p - cost_pct)
+        net_rs.append((p / 100.0) * entry * qty - cost_rs)
+        # net R: cost reduces the numerator; risk denominator stays gross/pre-cost
+        sl = _safe_float(t.get("stop_loss"))
+        if sl is not None:
+            risk_pct = abs(entry - sl) / entry * 100.0
+            if risk_pct != 0:
+                r_net_values.append((p - cost_pct) / risk_pct)
+
+    result["cost_coverage"] = len(net_pct)
+    if net_pct:
+        result["expectancy_pct_net"] = mean(net_pct)
+        result["expectancy_rs_net"] = mean(net_rs)
+        result["avg_cost_pct"] = mean(cost_pct_list)
+        result["avg_cost_rs"] = mean(cost_rs_list)
+        result["expectancy_pct_gross_cov"] = mean(gross_pct_cov)
+    result["r_net_coverage"] = len(r_net_values)
+    if r_net_values:
+        result["expectancy_in_r_net"] = mean(r_net_values)
 
     return result

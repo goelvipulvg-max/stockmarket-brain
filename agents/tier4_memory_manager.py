@@ -111,6 +111,18 @@ def format_expectancy_text(exp: dict, date_str: str) -> str:
     else:
         lines.append("Expectancy (R): N/A (no SL data)")
 
+    # --- Net of transaction costs (gap #7 + B4): reported ALONGSIDE the gross block above ---
+    if exp["expectancy_pct_net"] is not None:
+        cov = exp["cost_coverage"]
+        lines.append(f"Net expectancy (after costs): {exp['expectancy_pct_net']:+.2f}% per trade  [coverage {cov}/{n}]")
+        lines.append(f"  (gross on same {cov} covered: {exp['expectancy_pct_gross_cov']:+.2f}%;  avg round-trip cost {exp['avg_cost_pct']:.2f}% / Rs {exp['avg_cost_rs']:.0f})")
+        lines.append(f"Net expectancy (Rs): {exp['expectancy_rs_net']:+.0f} per trade  [coverage {cov}/{n}]")
+        if exp["expectancy_in_r_net"] is not None:
+            lines.append(f"Net expectancy (R): {exp['expectancy_in_r_net']:+.2f}R  [coverage {exp['r_net_coverage']}/{n}]")
+        lines.append("(Net = gross - cost on covered trades only; cost model assumes 0.10%/side slippage. Trades lacking exit_price are excluded from net.)")
+    else:
+        lines.append("Net expectancy (after costs): N/A (no coverage -- resolved trades lack exit_price/entry/qty)")
+
     if exp["preliminary"]:
         lines.append(f"(!) preliminary -- low sample (n={n} < {MIN_EXPECTANCY_N})")
 
@@ -199,7 +211,7 @@ def main():
     # --- Portfolio expectancy: ALL resolved paper_trades (true portfolio scope) ---
     resolved_rows = (
         supabase.table("paper_trades")
-        .select("pnl_pct,entry_price,stop_loss,quantity,direction,status")
+        .select("pnl_pct,entry_price,exit_price,stop_loss,quantity,direction,status")
         .in_("status", ["TARGET_HIT", "SL_HIT", "EXPIRED"])
         .execute()
         .data
