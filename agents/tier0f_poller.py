@@ -29,6 +29,17 @@ LOOKBACK_MINUTES = 30
 BATCH_LIMIT = 10
 MIN_SCORE = 6
 
+# Dormant confidence gate (reliability-gap B9). While USE_POLLER_CONFIDENCE_GATE
+# is false (default), the poller query is UNCHANGED and we shadow-log which
+# dispatched filings the gate WOULD prune (canary observability). When true, only
+# filings with trade_confidence >= POLLER_CONFIDENCE_THRESHOLD are dispatched.
+# trade_confidence is NEVER NULL (census: 0/3229) and is_material backstops
+# 0-defaults, so a plain >= is safe -- no fail-open clause needed. cf.
+# after_hours_watcher.py uses 70 for the SEPARATE after-hours pipeline --
+# divergence intentional. Flip true only after the B2 backtest validates the rule.
+POLLER_CONFIDENCE_THRESHOLD = 60
+USE_POLLER_CONFIDENCE_GATE = os.getenv("USE_POLLER_CONFIDENCE_GATE", "false").strip().lower() == "true"
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s -- %(levelname)s -- %(message)s'
@@ -37,21 +48,40 @@ log = logging.getLogger("tier0f_poller")
 
 
 def _query_pending_filings() -> list[dict]:
-    """Returns list of {id, symbol, event_type, material_score, classified_at}
-    for unprocessed material filings."""
+    """Returns list of {id, symbol, event_type, material_score, classified_at,
+    trade_confidence} for unprocessed material filings.
+
+    Dormant B9 gate: when USE_POLLER_CONFIDENCE_GATE is true, only filings with
+    trade_confidence >= POLLER_CONFIDENCE_THRESHOLD are returned. When false
+    (default) the result set is unchanged and we shadow-log how many dispatched
+    filings the gate WOULD have pruned, for canary observability before flipping.
+    """
     sb = get_client()
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=LOOKBACK_MINUTES)).isoformat()
 
-    r = sb.table('filings_log')\
-        .select('id, symbol, event_type, material_score, classified_at')\
+    q = sb.table('filings_log')\
+        .select('id, symbol, event_type, material_score, classified_at, trade_confidence')\
         .eq('is_material', True)\
         .gte('material_score', MIN_SCORE)\
         .eq('picked_by_tier0f', False)\
-        .gte('classified_at', cutoff)\
-        .order('classified_at', desc=False)\
-        .limit(BATCH_LIMIT)\
-        .execute()
-    return r.data or []
+        .gte('classified_at', cutoff)
+    if USE_POLLER_CONFIDENCE_GATE:
+        q = q.gte('trade_confidence', POLLER_CONFIDENCE_THRESHOLD)
+    q = q.order('classified_at', desc=False).limit(BATCH_LIMIT)
+    rows = q.execute().data or []
+
+    # --- B9 shadow-log (canary observability) ---
+    if USE_POLLER_CONFIDENCE_GATE:
+        log.info(f"[B9 gate] active, threshold={POLLER_CONFIDENCE_THRESHOLD} "
+                 f"-- sub-threshold filings excluded by query")
+    else:
+        below = [x for x in rows if (x.get('trade_confidence') or 0) < POLLER_CONFIDENCE_THRESHOLD]
+        if below:
+            log.info(f"[B9 shadow] {len(below)}/{len(rows)} dispatched filings have "
+                     f"tc<{POLLER_CONFIDENCE_THRESHOLD} (gate OFF -- dispatched anyway)")
+            for x in below:
+                log.info(f"[B9 shadow]   would-prune: {x.get('symbol')} tc={x.get('trade_confidence')}")
+    return rows
 
 
 def _dispatch_tier2f(filing_id: int) -> bool:

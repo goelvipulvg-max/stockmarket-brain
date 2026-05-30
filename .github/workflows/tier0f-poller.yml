@@ -25,4 +25,6 @@ jobs:
           echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
           echo "GITHUB_PAT=${{ secrets.WORKFLOW_DISPATCH_PAT }}" >> .env
       - name: Run Tier-0F Poller
+        env:
+          USE_POLLER_CONFIDENCE_GATE: "false"
         run: python -m agents.tier0f_poller
