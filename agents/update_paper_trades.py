@@ -116,6 +116,17 @@ def calc_pnl_pct(direction, entry, exit_price):
     return round(((entry - exit_price) / entry) * 100, 2)
 
 
+def compute_pnl_rs(pnl_pct, entry, qty):
+    """Rupee P&L from a direction-adjusted pnl_pct (pnl_pct already encodes BUY/SELL).
+
+    Returns None when qty is missing -- legacy source='TIER2' rows have no quantity
+    and their rupee P&L is not back-computable, so pnl_rs stays NULL for them.
+    """
+    if qty is None:
+        return None
+    return round((pnl_pct / 100.0) * entry * qty, 2)
+
+
 def main():
     now_ist = datetime.now(IST)
     is_market_close = now_ist.time() >= MARKET_CLOSE
@@ -253,11 +264,14 @@ def main():
                 if segment == "FNO":
                     exit_price = active_target
                     pnl = calc_pnl_pct(direction, entry, exit_price)
+                    qty = trade.get("quantity")
+                    pnl_rs = compute_pnl_rs(pnl, entry, qty)
                     update_data = {
                         "status": "TARGET_HIT",
                         "closed_at": now_ist.isoformat(),
                         "exit_price": exit_price,
                         "pnl_pct": pnl,
+                        "pnl_rs": pnl_rs,
                         "t2_hit": True,
                     }
                     if DRY_RUN:
@@ -268,9 +282,7 @@ def main():
                     closed += 1
                     # Phase 2: release capital on close (D3: skip NULL-quantity trades)
                     if not DRY_RUN:
-                        qty = trade.get("quantity")
                         if qty is not None:
-                            pnl_rs = round((pnl / 100) * entry * qty, 2)
                             release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                         else:
                             print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
@@ -298,11 +310,14 @@ def main():
             else:  # T3 — final exit (equity only)
                 exit_price = active_target
                 pnl = calc_pnl_pct(direction, entry, exit_price)
+                qty = trade.get("quantity")
+                pnl_rs = compute_pnl_rs(pnl, entry, qty)
                 update_data = {
                     "status": "TARGET_HIT",
                     "closed_at": now_ist.isoformat(),
                     "exit_price": exit_price,
                     "pnl_pct": pnl,
+                    "pnl_rs": pnl_rs,
                 }
                 if DRY_RUN:
                     print(f"  [DRY-RUN] Would update: {update_data}")
@@ -312,9 +327,7 @@ def main():
                 closed += 1
                 # Phase 2: release capital on close (D3: skip NULL-quantity trades)
                 if not DRY_RUN:
-                    qty = trade.get("quantity")
                     if qty is not None:
-                        pnl_rs = round((pnl / 100) * entry * qty, 2)
                         release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                     else:
                         print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
@@ -324,12 +337,15 @@ def main():
         elif new_status == "SL_HIT":
             exit_price = gap_exit_price or active_sl
             pnl = calc_pnl_pct(direction, entry, exit_price)
+            qty = trade.get("quantity")
+            pnl_rs = compute_pnl_rs(pnl, entry, qty)
             label = "GAP-EXIT" if gap_exit_price else "SL_HIT"
             update_data = {
                 "status": "SL_HIT",
                 "closed_at": now_ist.isoformat(),
                 "exit_price": exit_price,
                 "pnl_pct": pnl,
+                "pnl_rs": pnl_rs,
                 "trailing_sl": active_sl,
             }
             if DRY_RUN:
@@ -340,9 +356,7 @@ def main():
             closed += 1
             # Phase 2: release capital on close (D3: skip NULL-quantity trades)
             if not DRY_RUN:
-                qty = trade.get("quantity")
                 if qty is not None:
-                    pnl_rs = round((pnl / 100) * entry * qty, 2)
                     release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                 else:
                     print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
@@ -351,11 +365,14 @@ def main():
         elif new_status == "EXPIRED":
             exit_price = market["ltp"]
             pnl = calc_pnl_pct(direction, entry, exit_price)
+            qty = trade.get("quantity")
+            pnl_rs = compute_pnl_rs(pnl, entry, qty)
             update_data = {
                 "status": "EXPIRED",
                 "closed_at": now_ist.isoformat(),
                 "exit_price": exit_price,
                 "pnl_pct": pnl,
+                "pnl_rs": pnl_rs,
             }
             if DRY_RUN:
                 print(f"  [DRY-RUN] Would update: {update_data}")
@@ -365,9 +382,7 @@ def main():
             closed += 1
             # Phase 2: release capital on close (D3: skip NULL-quantity trades)
             if not DRY_RUN:
-                qty = trade.get("quantity")
                 if qty is not None:
-                    pnl_rs = round((pnl / 100) * entry * qty, 2)
                     release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                 else:
                     print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
