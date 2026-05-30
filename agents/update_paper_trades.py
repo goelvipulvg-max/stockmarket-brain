@@ -10,8 +10,10 @@ Logic:
 - Gap-up trailing SL adjustment (BUY equity, T2+)
 - Idempotency guards: t1_hit / t2_hit prevent duplicate upgrades
 - DRY-RUN mode: --dry-run flag skips all DB writes
-- Swing window: trades stay OPEN for up to MAX_HOLDING_DAYS calendar days
-- At 15:30 IST on day >= MAX_HOLDING_DAYS, force-closes remaining OPEN as EXPIRED at LTP
+- Swing window: trades stay OPEN for up to their per-row max_holding_days calendar
+  days (horizon-based: SHORT=3 / MEDIUM=10 / LONG=30; set at signal time by Tier-2F).
+  Falls back to DEFAULT_HOLDING_DAYS when a row's max_holding_days is NULL/0/missing.
+- At 15:30 IST on day >= that trade's max_holding_days, force-closes it as EXPIRED at LTP
 
 Backtest convention: zero slippage. Exit at exact target/SL on hit, LTP on expiry.
 """
@@ -26,7 +28,7 @@ load_dotenv(override=True)
 
 IST = ZoneInfo("Asia/Kolkata")
 MARKET_CLOSE = dt_time(15, 30)
-MAX_HOLDING_DAYS = 5
+DEFAULT_HOLDING_DAYS = 10  # fallback only when a row's max_holding_days is NULL/0/missing (matches schema DEFAULT 10)
 DRY_RUN = "--dry-run" in sys.argv
 
 # ── Trailing stop-loss parameters (all multipliers on entry_price) ──
@@ -52,6 +54,18 @@ def _dir_price(entry, mult, direction):
     if direction == "BUY":
         return round(entry * mult, 2)
     return round(entry * (2 - mult), 2)
+
+
+def should_force_expire(holding_days, row_max_holding_days, is_market_close,
+                        default_days=DEFAULT_HOLDING_DAYS):
+    """Time-stop decision for an OPEN trade (pure; no I/O).
+
+    Honors the trade's per-row max_holding_days (horizon window SHORT=3 /
+    MEDIUM=10 / LONG=30). Falls back to default_days when the row value is
+    NULL / 0 / missing. Calendar-day based, matching holding_days upstream.
+    """
+    max_hold = row_max_holding_days or default_days
+    return is_market_close and holding_days >= max_hold
 
 
 try:
@@ -120,6 +134,7 @@ def main():
         ticker = trade["ticker"]
         signal_date = date.fromisoformat(trade["signal_date"])
         holding_days = (now_ist.date() - signal_date).days
+        max_hold = trade.get("max_holding_days") or DEFAULT_HOLDING_DAYS  # per-row horizon
 
         market = get_market_data(ticker)
         if market is None:
@@ -205,7 +220,7 @@ def main():
                     new_status = "SL_HIT"
 
         # ── Expiry ──
-        if not new_status and is_market_close and holding_days >= MAX_HOLDING_DAYS:
+        if not new_status and should_force_expire(holding_days, trade.get("max_holding_days"), is_market_close):
             new_status = "EXPIRED"
 
         # ── Act on result ──
@@ -359,11 +374,11 @@ def main():
             print(f"  {ticker}: EXPIRED @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         else:
-            days_left = max(0, MAX_HOLDING_DAYS - holding_days)
+            days_left = max(0, max_hold - holding_days)
             level_info = f"T={active_target} SL={active_sl}"
             print(f"  {ticker}: OPEN [{current_level}] | LTP {market['ltp']} "
                   f"(range: {market['day_low']}-{market['day_high']}) | "
-                  f"{level_info} | day {holding_days}/{MAX_HOLDING_DAYS}, "
+                  f"{level_info} | day {holding_days}/{max_hold}, "
                   f"{days_left} left")
 
     still_open = len(open_trades) - closed
