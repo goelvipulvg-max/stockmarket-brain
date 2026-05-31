@@ -78,3 +78,28 @@ Thumbs.db
 
 # Node
 node_modules/
+
+# --- Token-saving additions (2026-05-31 audit) ---
+
+# Code-graph artifacts — queried via .\graphq.ps1 (script reads disk directly, unaffected
+# by this file); never read manually. graph.json 1.2MB + graph.html 1.1MB + ~120 AST files
+graphify-out/
+
+# Serena symbol cache — accessed via MCP tools, not files; .pkl are binary (~2.2MB)
+.serena/
+
+# Stale investigation scratch — old recon/audit logs, txt, md, json (~1.2MB)
+dumps/
+
+# Transient scratch files (.commit_msg.tmp, tmp_*.json, etc.)
+*.tmp
+tmp_*.json
+
+# Root-level dated investigation notes — scratch (e.g. tier2f-investigation-2026-05-22.md)
+/*investigation*.md
+
+# Standard temp/cache dirs (mirror .gitignore; insurance even though absent now)
+tmp/
+temp/
+.cache/
+.claude/local/
