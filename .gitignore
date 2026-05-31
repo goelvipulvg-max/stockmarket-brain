@@ -60,6 +60,7 @@ tmp/
 temp/
 reports/
 dumps/
+graphify-out/
 .commit_msg.tmp
 
 # Data files (commit only sample/seed data, not full datasets)
