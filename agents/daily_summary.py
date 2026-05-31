@@ -35,6 +35,7 @@ from utils.telegram_client import send_message
 from utils.supabase_client import get_client
 from utils.expectancy import compute_expectancy
 from utils import trading_calendar
+from utils.monitor_format import last_market_day, fmt_rs
 
 # Mirrors tier0f_poller.py tradeable gate + tier4_memory_manager resolved set.
 SIGNAL_CONF_FLOOR = 60
@@ -45,44 +46,9 @@ EXPECTANCY_COLS = "pnl_pct,entry_price,exit_price,stop_loss,quantity"
 
 
 # ---------------------------------------------------------------------------
-# Pure helpers (no I/O -- unit-tested)
+# Pure helpers (no I/O -- unit-tested). last_market_day + fmt_rs are shared
+# with health_monitor via utils.monitor_format (imported above).
 # ---------------------------------------------------------------------------
-
-def last_market_day(today: date) -> date:
-    """Most recent NSE trading day strictly before `today`.
-
-    The 8 AM digest reports the previous session: Tue->Mon, Mon->Fri (skips the
-    weekend), and skips NSE holidays. Walks back day-by-day (bounded).
-    """
-    d = today - timedelta(days=1)
-    for _ in range(10):  # generous bound: covers any weekend+holiday cluster
-        if trading_calendar.is_trading_day(d):
-            return d
-        d = d - timedelta(days=1)
-    return d  # fallback: 10 consecutive non-trading days is implausible
-
-
-def fmt_rs(v) -> str:
-    """Indian-style plain rupee formatting, e.g. 1000000 -> 'Rs.10,00,000'.
-
-    None / non-numeric -> 'N/A'. Rounds to whole rupees.
-    """
-    try:
-        n = float(v)
-    except (TypeError, ValueError):
-        return "N/A"
-    neg = n < 0
-    s = str(int(abs(round(n))))
-    if len(s) > 3:
-        head, tail = s[:-3], s[-3:]
-        parts = []
-        while len(head) > 2:
-            parts.insert(0, head[-2:])
-            head = head[:-2]
-        parts.insert(0, head)
-        s = ",".join(parts) + "," + tail
-    return ("-Rs." if neg else "Rs.") + s
-
 
 def format_winrate_line(exp: dict) -> str:
     """One-line win-rate/expectancy summary from a compute_expectancy() dict.
