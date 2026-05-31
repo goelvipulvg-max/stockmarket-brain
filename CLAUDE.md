@@ -14,7 +14,7 @@ This repo contains all code for the StockMarket-Brain personal trading intellige
 - data/ - Reference data (trade history, ticker maps)
 - scripts/ - Setup and test scripts
 
-## Context Navigation (3 layers — cheapest first, STOP when you have enough)
+## Context Navigation (4 layers — cheapest first, STOP when you have enough)
 A cold full-read of this repo costs ~165K tokens. Navigate in order:
 1. **Graph** — query the Graphify code graph instead of cold-reading (finds the relevant
    files/functions + how they connect). Graph lives at `graphify-out/graph.json`; a copy plus
@@ -26,11 +26,17 @@ A cold full-read of this repo costs ~165K tokens. Navigate in order:
    - The graph **auto-rebuilds AST-only (0 tokens)** on every commit via the installed post-commit hook;
      rebuild manually with `.\graphq.ps1 update .`. **NEVER run `graphify extract`** — it calls an LLM and
      spends tokens (the wrapper blocks it). AST-only, always.
-2. **Vault** — for design intent, strategy and "why", read the Obsidian vault at
+2. **Symbols (Serena MCP)** — once the graph points you to a file/area, use Serena's semantic tools for
+   exact symbol-level detail and complete reference lists BEFORE reading raw code: `find_symbol` (locate a
+   definition), `find_referencing_symbols` (every call site), `get_symbols_overview` (a file's symbol map).
+   LSP-based (Pyright) — no tokens, no API key. Fixes the AST graph's lexical-relevance gap (resolves e.g.
+   "position sizing" to `utils/position_sizer.py`, not `docs/*.md`). Registered as a local `claude mcp`
+   server; if its tools aren't visible, start a fresh session so the harness loads them.
+3. **Vault** — for design intent, strategy and "why", read the Obsidian vault at
    `C:\Users\goelv\StockMarket-Brain-v2-Hybrid-CLEAN\StockMarket-Brain` (start at
    `00-Start-Here\VAULT-INDEX.md`). Vault docs describe the original design and may lag the code —
    **treat the code as the source of truth.**
-3. **Raw code** — open only the specific files the graph/vault pointed you to. Avoid blind full-repo reads.
+4. **Raw code** — open only the specific files the graph/vault/symbols pointed you to. Avoid blind full-repo reads.
 
 ## Environment & Workflow Rules (non-negotiable)
 - **Python**: always use `.venv\Scripts\python.exe`; never install project deps into global Python;

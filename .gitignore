@@ -61,6 +61,7 @@ temp/
 reports/
 dumps/
 graphify-out/
+.serena/
 .commit_msg.tmp
 
 # Data files (commit only sample/seed data, not full datasets)
