@@ -22,6 +22,7 @@ from datetime import datetime, date, time as dt_time
 from zoneinfo import ZoneInfo
 from utils.supabase_client import get_client
 from utils.capital_ledger import release_capital
+from utils.trade_memory_writer import update_trade_memory_outcome
 from curl_cffi import requests as curl_requests
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -286,6 +287,8 @@ def main():
                             release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                         else:
                             print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
+                    # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
+                    update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
                     print(f"  {ticker}: T2_HIT (FNO) @ {exit_price} | PnL: {pnl}% | "
                           f"CLOSED  (day {holding_days})")
                 else:
@@ -331,6 +334,8 @@ def main():
                         release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                     else:
                         print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
+                # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
+                update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
                 print(f"  {ticker}: T3_HIT @ {exit_price} | PnL: {pnl}% | "
                       f"CLOSED  (day {holding_days})")
 
@@ -360,6 +365,8 @@ def main():
                     release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                 else:
                     print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
+            # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
+            update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
             print(f"  {ticker}: {label} @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         elif new_status == "EXPIRED":
@@ -386,6 +393,8 @@ def main():
                     release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
                 else:
                     print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
+            # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
+            update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
             print(f"  {ticker}: EXPIRED @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         else:

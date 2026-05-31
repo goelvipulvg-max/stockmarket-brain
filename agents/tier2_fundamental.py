@@ -28,6 +28,7 @@ from utils.capital_ledger import get_current_portfolio, deploy_capital
 from utils.tiered_target_generator import generate_targets
 from utils.telegram_client import send_message
 from utils.supabase_client import get_client
+from utils.trade_memory_writer import build_live_trade_memory_row, insert_live_trade_memory
 
 load_dotenv()
 
@@ -513,6 +514,25 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     # --- Deploy capital ---
     deploy_capital(trade_id, size_rs)
     print(f"[STAGE 10: insert] trade_id={trade_id}, size_rs={size_rs}, deployed")
+
+    # --- Phase 7 §9.1: capture LIVE_TRADE row to trade_memory_v2 (SUPABASE) ---
+    # NON-FATAL: paper_trade + capital are already committed above; a capture
+    # failure must never block signal generation. Wrapped here AND inside the
+    # writer (mirrors _insert_disagreement's fail-open contract).
+    try:
+        mem_row = build_live_trade_memory_row(
+            trade_id=trade_id,
+            haiku_output=haiku_output,
+            flash_output=flash_output,
+            sector=context["sector"],
+            market_cap_cr=context["market_cap_cr"],
+            nifty_mood=context["nifty_mood"],
+            symbol_base=symbol,
+            event_type=filing["event_type"],
+        )
+        insert_live_trade_memory(sb, mem_row)
+    except Exception as e:
+        print(f"[trade_memory] capture skipped: {e} -- continuing (non-critical)")
 
     # --- Compose Telegram message text (actual send in checkpoint 5) ---
     mode_tag = {
