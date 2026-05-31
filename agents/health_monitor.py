@@ -93,14 +93,24 @@ def other_rate(event_type_counts: dict):
     return event_type_counts.get(OTHER_EVENT_TYPE, 0) / total * 100.0
 
 
-def is_overdue(signal_date: date, max_holding_days, today: date) -> bool:
-    """True if an OPEN trade has exceeded its PER-ROW holding window (db4eaae).
+def is_overdue(signal_date: date, max_holding_days, ref_day: date) -> bool:
+    """True if a post-close run on `ref_day` should already have EXPIRED this trade.
 
-    max_holding_days NULL/0/missing -> DEFAULT_HOLDING_DAYS (matches the
-    updater's fallback). Calendar days, matching update_paper_trades.py:122.
+    `ref_day` is the last COMPLETED post-close trading day (caller passes
+    report_date = last_market_day(today)) -- NOT calendar today. The updater only
+    force-expires at a >=15:30 IST run (update_paper_trades.should_force_expire:
+    is_market_close AND holding_days >= max_hold) and this monitor runs ~09:00,
+    before the same-day expiry. Judging vs calendar today therefore flags trades a
+    full trading day early -- and over a weekend/holiday it false-alarms on trades
+    that no run has yet had the chance to expire.
+
+    Comparator is >= to MIRROR should_force_expire exactly (held >= max_hold), so a
+    still-OPEN trade here means a completed post-close run genuinely failed to
+    expire it. max_holding_days NULL/0/missing -> DEFAULT_HOLDING_DAYS (matches the
+    updater's fallback). Calendar-day delta, matching holding_days upstream.
     """
     max_hold = max_holding_days or DEFAULT_HOLDING_DAYS
-    return (today - signal_date).days > max_hold
+    return (ref_day - signal_date).days >= max_hold
 
 
 def reconcile(cash, deployed, total_equity, ledger_deploy_sum,
@@ -228,14 +238,19 @@ def evaluate(data: dict) -> list:
                 f"has no capital_ledger DEPLOY row"
             )
 
-    # 6. Trades past max_holding_days (per-row, db4eaae)
+    # 6. Trades past max_holding_days (per-row, db4eaae). Judged vs report_date =
+    # the last COMPLETED post-close trading day, NOT calendar today: the updater
+    # only expires at a >=15:30 IST run and this monitor runs ~09:00. This
+    # suppresses weekend/holiday false-positives (no run has had the chance to
+    # expire) while still catching a genuine missed expiry on a completed run.
+    ref_day = data["report_date"]
     for t in data["open_trades"]:
-        if is_overdue(t["signal_date"], t.get("max_holding_days"), data["today"]):
-            held = (data["today"] - t["signal_date"]).days
+        if is_overdue(t["signal_date"], t.get("max_holding_days"), ref_day):
+            held = (ref_day - t["signal_date"]).days
             cap = t.get("max_holding_days") or DEFAULT_HOLDING_DAYS
             problems.append(
                 f"Overdue: {t.get('ticker')} (trade {t['id']}) held {held}d "
-                f"> max_holding_days {cap}"
+                f">= max_holding_days {cap} as of post-close {ref_day.isoformat()}"
             )
 
     return problems

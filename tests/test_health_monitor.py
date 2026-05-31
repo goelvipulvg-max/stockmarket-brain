@@ -69,16 +69,23 @@ check("3 of 12 OTHER -> 25%", other_rate({"OTHER": 3, "RESULTS": 9}), 25.0)
 check("0 OTHER -> 0%", other_rate({"RESULTS": 10}), 0.0)
 check("all OTHER -> 100%", other_rate({"OTHER": 5}), 100.0)
 
-# --- is_overdue (per-row max_holding_days) ---
-today = date(2026, 6, 8)
-check("MEDIUM(10) sig 05-28 -> 11 days > 10 -> overdue", is_overdue(date(2026, 5, 28), 10, today), True)
-check("MEDIUM(10) sig 05-29 -> 10 days, not > 10 -> not overdue", is_overdue(date(2026, 5, 29), 10, today), False)
-check("SHORT(3) sig 06-04 -> 4 > 3 -> overdue", is_overdue(date(2026, 6, 4), 3, today), True)
-check("LONG(30) sig 05-28 -> 11 < 30 -> not overdue", is_overdue(date(2026, 5, 28), 30, today), False)
-check("NULL max_hold -> default 10; sig 05-28 -> 11 > 10 -> overdue",
-      is_overdue(date(2026, 5, 28), None, today), True)
-check("0 max_hold -> default 10 -> not overdue at 10 days",
-      is_overdue(date(2026, 5, 29), 0, today), False)
+# --- is_overdue (per-row max_holding_days; judged vs ref_day, >= mirrors updater) ---
+# ref_day is the last COMPLETED post-close trading day (caller passes report_date).
+# Comparator is >= to mirror update_paper_trades.should_force_expire (holding_days
+# >= max_hold): if a post-close run on ref_day should have expired it, it's overdue.
+ref = date(2026, 6, 8)
+check("MEDIUM(10) sig 05-28 -> held 11 >= 10 -> overdue", is_overdue(date(2026, 5, 28), 10, ref), True)
+check("MEDIUM(10) sig 05-29 -> held 10 >= 10 -> overdue (>= boundary, mirrors updater)",
+      is_overdue(date(2026, 5, 29), 10, ref), True)
+check("MEDIUM(10) sig 05-30 -> held 9 < 10 -> not overdue", is_overdue(date(2026, 5, 30), 10, ref), False)
+check("SHORT(3) sig 06-04 -> held 4 >= 3 -> overdue", is_overdue(date(2026, 6, 4), 3, ref), True)
+check("SHORT(3) sig 06-05 -> held 3 >= 3 -> overdue (boundary)", is_overdue(date(2026, 6, 5), 3, ref), True)
+check("SHORT(3) sig 06-06 -> held 2 < 3 -> not overdue", is_overdue(date(2026, 6, 6), 3, ref), False)
+check("LONG(30) sig 05-28 -> held 11 < 30 -> not overdue", is_overdue(date(2026, 5, 28), 30, ref), False)
+check("NULL max_hold -> default 10; sig 05-29 -> held 10 >= 10 -> overdue",
+      is_overdue(date(2026, 5, 29), None, ref), True)
+check("0 max_hold -> default 10; sig 05-30 -> held 9 < 10 -> not overdue",
+      is_overdue(date(2026, 5, 30), 0, ref), False)
 
 # --- reconcile (D4 identity; live numbers should pass) ---
 ok, probs = reconcile(cash=832504.24, deployed=167495.76, total_equity=1000000.0,
@@ -193,7 +200,37 @@ orphan = evaluate(green_data(ledger_rows=[
 ]))
 check_in("orphan message present", " ".join(orphan), "Insert/deploy failure: OPEN trade 162")
 
-overdue = evaluate(green_data(today=date(2026, 6, 30)))  # far future -> all 3 overdue
+# Check 6 judges overdue against report_date (last COMPLETED post-close trading
+# day), NOT calendar today -- the updater only expires at a post-close run and the
+# monitor runs ~09:00 (before the same-day 15:30 expiry). open_trades keep ids
+# 160/161/162 so the ledger DEPLOY rows above keep checks 4/5 green; we isolate
+# Check 6. GILLETTE id 161 signal Wed 2026-05-27, max_hold 3.
+gillette_open = [
+    {"id": 160, "ticker": "ASHOKLEY.NS", "signal_date": date(2026, 5, 28), "max_holding_days": 10},
+    {"id": 161, "ticker": "GILLETTE.NS", "signal_date": date(2026, 5, 27), "max_holding_days": 3},
+    {"id": 162, "ticker": "LUPIN.NS", "signal_date": date(2026, 5, 28), "max_holding_days": 10},
+]
+
+# Weekend false-positive SUPPRESSED: Mon 2026-06-01 09:00 run. report_date =
+# last_market_day = Fri 2026-05-29; GILLETTE held_at_ref = 05-29-05-27 = 2 < 3.
+# (Calendar today 06-01 would give 5 > 3 -- the OLD bug this fix removes.)
+weekend = evaluate(green_data(today=date(2026, 6, 1), report_date=date(2026, 5, 29),
+                              is_market_open=False, open_trades=gillette_open))
+check("GILLETTE weekend false-positive suppressed -> no problems", weekend, [])
+
+# Genuine failure: Tue 2026-06-02 09:00 and GILLETTE STILL open -> Monday's
+# post-close run should have expired it. report_date = Mon 2026-06-01;
+# held_at_ref = 06-01-05-27 = 5 >= 3 -> overdue (only GILLETTE; 160/162 held 4 < 10).
+genuine = evaluate(green_data(today=date(2026, 6, 2), report_date=date(2026, 6, 1),
+                              is_market_open=False, open_trades=gillette_open))
+genuine_msgs = [p for p in genuine if p.startswith("Overdue:")]
+check("genuine failure: exactly 1 overdue", len(genuine_msgs), 1)
+check_in("genuine overdue names GILLETTE", genuine_msgs[0], "GILLETTE.NS")
+check_in("genuine overdue names max_holding_days", genuine_msgs[0], "max_holding_days")
+check_in("genuine overdue names the post-close trading day", genuine_msgs[0], "2026-06-01")
+
+# Far-future report_date -> all 3 overdue (default fixture signals 05-28).
+overdue = evaluate(green_data(report_date=date(2026, 6, 30)))
 overdue_msgs = [p for p in overdue if p.startswith("Overdue:")]
 check("all 3 overdue", len(overdue_msgs), 3)
 check_in("overdue message", overdue_msgs[0], "max_holding_days")
