@@ -14,6 +14,40 @@ This repo contains all code for the StockMarket-Brain personal trading intellige
 - data/ - Reference data (trade history, ticker maps)
 - scripts/ - Setup and test scripts
 
+## Where things live (go straight here, skip the blind scan)
+Verified 2026-06-01. Level-0 shortcut: if a target isn't listed, fall through to
+Context Navigation below. Code is the source of truth; line refs are approximate.
+
+DATA -- which DB owns what
+- Trades/signals: Supabase `paper_trades` (col `source`: 'TIER2F' = fundamental path,
+  'TIER2' = technical path).
+  GOTCHA: TIER2F `raw_signal` is double-json-encoded (json.dumps at
+  tier2_fundamental.py:486) -> stored as a JSONB string scalar; audit queries must
+  CASE-decode (see memory tier2f_ai_sl_canary_2026_05_31).
+- Capital: Supabase `portfolio` + `capital_ledger` -> utils/capital_ledger.py.
+- Filing memory: Supabase `filing_memory` -> agents/filing_memory_sync.py.
+- Fundamentals/sector: Neon (Postgres) `company_profiles` -> utils/neon_fundamentals.py
+  (raw conn: utils/neon_client.py).
+
+SIGNAL / RISK LOGIC
+- Fundamental signal + AI-SL: agents/tier2_fundamental.py
+  (USE_AI_SL flag :87, validate_ai_signal :97, AI-SL blend stage :379-486).
+- Technical signal: agents/tier2_signals.py.
+- Reward:risk floor: utils/reward_risk.py (RR_FLOOR=1.5, passes_rr_floor()).
+- Position sizing: utils/position_sizer.py (RISK_PCT=0.00125, MAX_TRADE_PCT=0.025).
+- Trade updates / SL-target hit / expiry: agents/update_paper_trades.py.
+
+FLAGS -- defined in code, effective values in the workflow
+- Defs: agents/tier2_fundamental.py (USE_AI_SL :87, USE_PRICE_STRUCTURE_GATE :72,
+  USE_VOLUME_GATE :77).
+- Effective: .github/workflows/tier2f.yml (USE_AI_SL="true" :36; both gates unset = DORMANT).
+- Dormant gate logic: utils/price_structure.py (gap #1), utils/volume_structure.py (gap #3).
+
+AGENTS / IO
+- Two-AI consensus: utils/ai_consensus.py (Analyst=Claude Haiku 4.5, Verifier=DeepSeek V4 Flash).
+- Telegram: utils/telegram_client.py (send_message; channel = per-caller bot_token+chat_id).
+- Schedules: .github/workflows/*.yml (one per tier/agent).
+
 ## Context Navigation (4 layers — cheapest first, STOP when you have enough)
 A cold full-read of this repo costs ~165K tokens. Navigate in order:
 1. **Graph** — query the Graphify code graph instead of cold-reading (finds the relevant
