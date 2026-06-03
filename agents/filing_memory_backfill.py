@@ -28,6 +28,22 @@ def _date_str(d):
     return str(d)
 
 
+def _split_factor(splits, base_date, measure_date):
+    """B6: cumulative split ratio for ex-dates strictly inside (base_date, measure_date].
+
+    With auto_adjust=False the raw base price is pre-split and a post-split window
+    close is on a different share basis; dividing the base by this factor expresses
+    it in post-split terms so raw_move reflects true price-return. Dividends ignored
+    by design (price-return, splits-only). Returns 1.0 when no in-window split.
+    """
+    F = 1.0
+    if splits is not None and len(splits):
+        for ts, ratio in splits.items():
+            if base_date < ts.date() <= measure_date:
+                F *= float(ratio)
+    return F
+
+
 def backfill_base_prices():
     """Pass 1: fill filing_memory.base_price and nifty_base for rows where base_price IS NULL.
 
@@ -100,7 +116,7 @@ def backfill_base_prices():
         nifty_df = yf.Ticker("^NSEI").history(
             start=overall_min,
             end=overall_max + timedelta(days=1),
-            auto_adjust=True,
+            auto_adjust=False,  # B6: index has no actions; raw for determinism
         )
         nifty_dict = {
             _date_str(idx): {"Open": float(row["Open"]), "Close": float(row["Close"])}
@@ -126,7 +142,7 @@ def backfill_base_prices():
             df = yf.Ticker(symbol + ".NS").history(
                 start=sym_min,
                 end=sym_max + timedelta(days=1),
-                auto_adjust=True,
+                auto_adjust=False,  # B6: raw as-of base price (point-in-time)
             )
         except Exception as e:
             print(f"[WARN] yf fetch failed: {symbol}: {type(e).__name__}: {e}")
@@ -231,6 +247,7 @@ def backfill_outcome_windows():
 
     for r in rows:
         fd = _filing_date(r)
+        base_date = next_trading_day(fd)  # B6: needed for in-window split factor
         bp = r["base_price"]
         nb = r["nifty_base"]
         if bp is None or nb is None:
@@ -250,6 +267,7 @@ def backfill_outcome_windows():
                 "base_price": bp,
                 "nifty_base": nb,
                 "window": N,
+                "base_date": base_date,
                 "target_date": target_date,
             })
 
@@ -278,7 +296,7 @@ def backfill_outcome_windows():
         nifty_df = yf.Ticker("^NSEI").history(
             start=overall_min,
             end=overall_max + timedelta(days=1),
-            auto_adjust=True,
+            auto_adjust=False,  # B6: index has no actions; raw for determinism
         )
         nifty_dict = {
             _date_str(idx): {"Open": float(row["Open"]), "Close": float(row["Close"])}
@@ -303,11 +321,13 @@ def backfill_outcome_windows():
         filled_before = sum(filled.values())
 
         try:
-            df = yf.Ticker(symbol + ".NS").history(
+            tk = yf.Ticker(symbol + ".NS")
+            df = tk.history(
                 start=sym_min,
                 end=sym_max + timedelta(days=1),
-                auto_adjust=True,
+                auto_adjust=False,  # B6: raw close; in-window splits handled below
             )
+            splits = tk.splits  # B6: ex-date -> ratio, for in-window split adjustment
         except Exception as e:
             print(f"[WARN] yf fetch failed: {symbol}: {type(e).__name__}: {e}")
             for entry in entries:
@@ -348,7 +368,11 @@ def backfill_outcome_windows():
             bp = entry["base_price"]
             nb = entry["nifty_base"]
 
-            raw_move = round((stock_close - bp) / bp * 100, 2)
+            # B6: express raw pre-split base in post-split terms for in-window splits
+            F = _split_factor(splits, entry["base_date"], entry["target_date"])
+            adj_base = bp / F
+
+            raw_move = round((stock_close - adj_base) / adj_base * 100, 2)
             nifty_move = round((nifty_close - nb) / nb * 100, 2)
             alpha = round(raw_move - nifty_move, 2)
 
