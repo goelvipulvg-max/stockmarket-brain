@@ -13,6 +13,7 @@ def check_liquidity(symbol: str) -> tuple:
     Checks last 5 days average daily traded value via yFinance.
     """
     import yfinance as yf
+    import time
 
     if not symbol:
         return False, 0.0
@@ -27,5 +28,17 @@ def check_liquidity(symbol: str) -> tuple:
         avg_daily_value = avg_volume * avg_price
         return avg_daily_value >= MIN_DAILY_VALUE_INR, float(avg_daily_value)
     except Exception as e:
-        print(f"     ⚠️  Liquidity check failed for {symbol}: {e}")
-        return False, 0.0
+        print(f"     ⚠️  Liquidity check failed for {symbol}: {e} — retrying once")
+        try:
+            time.sleep(1)
+            ticker = yf.Ticker(f"{symbol}.NS")
+            hist = ticker.history(period="5d")
+            if hist.empty:
+                return False, 0.0
+            avg_volume = hist["Volume"].mean()
+            avg_price = hist["Close"].mean()
+            avg_daily_value = avg_volume * avg_price
+            return avg_daily_value >= MIN_DAILY_VALUE_INR, float(avg_daily_value)
+        except Exception as e2:
+            print(f"     ⚠️  LIQUIDITY CHECK BYPASSED (network) for {symbol}: retry also failed ({e2}) — fail-open, trade proceeds")
+            return True, 0.0

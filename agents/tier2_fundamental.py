@@ -15,6 +15,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from utils.fno_ban_list import is_in_ban
+from utils.liquidity_check import check_liquidity
 from utils.neon_fundamentals import get_fundamentals
 from utils.yfinance_chart import get_chart_snapshot
 from utils.price_structure import compute_price_structure, validate_price_structure
@@ -188,6 +189,12 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     print(f"[STAGE 1: fno_ban_check] symbol={symbol}, banned={banned}")
     if banned:
         return {"skip": "fno_ban", "symbol": symbol}
+
+    # --- Step 1.5: Liquidity gate (₹5 Cr average daily traded value) ---
+    is_liquid, liquidity_value = check_liquidity(symbol)
+    print(f"[STAGE 1.5: liquidity] symbol={symbol}, is_liquid={is_liquid}, avg_daily_value_inr={liquidity_value:,.0f}")
+    if not is_liquid:
+        return {"skip": "illiquid", "symbol": symbol, "avg_daily_value_inr": round(liquidity_value, 2)}
 
     # --- Step 2: Neon company_profiles lookup ---
     fundamentals = get_fundamentals(symbol)
