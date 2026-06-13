@@ -146,23 +146,30 @@ def classify_filing(filing, pdf_summary=None, max_retries=2):
             raise
 
 def save_to_supabase(filing, clf):
-    sb.table("filings_log").insert({
-        "symbol": str(filing.get("symbol","")),
-        "company_name": filing.get("company",""),
-        "exchange": filing.get("exchange","NSE"),
-        "event_type": clf.get("event_type","OTHER"),
-        "summary": clf.get("summary",""),
-        "material_score": clf.get("material_score",0),
-        "is_material": clf.get("is_material", False),
-        "directional_bias": clf.get("directional_bias"),
-        "reasoning": clf.get("reasoning"),
-        "trade_confidence": clf.get("trade_confidence", 0),
-        "raw_title": filing.get("title",""),
-        "source_url": filing.get("link",""),
-        "url_hash": url_hash(filing.get("dedup_key", "")),
-        "published_at": parse_nse_datetime(filing.get("pubdate")),
-        "telegram_sent": clf.get("telegram_sent", False)
-    }).execute()
+    try:
+        sb.table("filings_log").insert({
+            "symbol": str(filing.get("symbol","")),
+            "company_name": filing.get("company",""),
+            "exchange": filing.get("exchange","NSE"),
+            "event_type": clf.get("event_type","OTHER"),
+            "summary": clf.get("summary",""),
+            "material_score": clf.get("material_score",0),
+            "is_material": clf.get("is_material", False),
+            "directional_bias": clf.get("directional_bias"),
+            "reasoning": clf.get("reasoning"),
+            "trade_confidence": clf.get("trade_confidence", 0),
+            "raw_title": filing.get("title",""),
+            "source_url": filing.get("link",""),
+            "url_hash": url_hash(filing.get("dedup_key", "")),
+            "published_at": parse_nse_datetime(filing.get("pubdate")),
+            "telegram_sent": clf.get("telegram_sent", False)
+        }).execute()
+    except Exception as e:
+        err = str(e)
+        if "23505" in err or "duplicate key" in err.lower() or "url_hash" in err.lower():
+            print(f"     ⏭️  Duplicate url_hash (23505) — skipping (benign race)")
+            return
+        raise
 
 def main():
     print("\n" + "="*50)

@@ -33,11 +33,15 @@ def get_relevant_patterns(event_type: str, sector: str, limit: int = 3) -> List[
         rows = sb.table("pattern_insights").select("*") \
             .eq("active", True) \
             .or_(f"event_type.eq.{ev},sector.eq.{sec}") \
-            .order("confidence", desc=True) \
-            .order("sample_size", desc=True) \
-            .limit(limit) \
-            .execute().data
-        return rows or []
+            .execute().data or []
+        # Rank client-side: HIGH > MEDIUM > LOW, then sample_size desc.
+        # Server-side .order("confidence") does lexical sort (LOW > HIGH > MEDIUM).
+        RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+        rows.sort(key=lambda r: (
+            RANK.get((r.get("confidence") or "").upper(), 0),
+            r.get("sample_size") or 0,
+        ), reverse=True)
+        return rows[:limit]
     except Exception as e:
         print(f"[pattern_insights_retriever] Query failed: {e} -- returning empty list")
         return []   # fail-open: missing patterns don't block trade

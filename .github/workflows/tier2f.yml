@@ -1,5 +1,9 @@
 name: Tier-2F Fundamental Signal
 
+concurrency:
+  group: tier2f-capital
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
