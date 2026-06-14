@@ -23,7 +23,7 @@ from utils.volume_structure import compute_volume_structure, validate_volume_str
 from utils.reward_risk import RR_FLOOR
 from utils.filing_memory_brief import get_filing_memory_brief
 from utils.pattern_insights_retriever import get_relevant_patterns
-from utils.ai_consensus import run_analyst, run_verifier, determine_consensus
+from utils.ai_consensus import run_analyst, run_verifier, determine_consensus, _run_deepseek_as_analyst, _safe_conf
 from utils.position_sizer import calculate_position_size
 from utils.capital_ledger import get_current_portfolio, deploy_capital
 from utils.tiered_target_generator import generate_targets
@@ -59,7 +59,6 @@ HAIKU_MODEL = "claude-haiku-4-5-20251001"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 CONFIDENCE_FLOOR = 50
 CONFIDENCE_CEILING = 85
-SOLO_MODE_HAIRCUT = 10
 AGREEMENT_THRESHOLD = 70
 AVG_CONFIDENCE_FLOOR = 65
 HORIZON_TO_DAYS = {"SHORT": 3, "MEDIUM": 10, "LONG": 30}
@@ -303,44 +302,58 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     haiku_output = None
     flash_output = None
 
-    # --- Step 6: Haiku analyst with Tier-2F prompt ---
+    # --- Step 6: Haiku analyst (or DeepSeek-as-analyst fallback) with Tier-2F prompt ---
     try:
         haiku_output = run_analyst(context, prompt_template=TIER2F_ANALYST_PROMPT)
     except Exception as e:
-        print(f"[STAGE 6: haiku] failed: {e} -- entering SOLO_DEEPSEEK fallback")
-        fallback_mode = "SOLO_DEEPSEEK"
+        print(f"[STAGE 6: haiku] failed: {e} -- attempting DeepSeek as analyst fallback")
+        try:
+            haiku_output = _run_deepseek_as_analyst(context, prompt_template=TIER2F_ANALYST_PROMPT)
+            fallback_mode = "SOLO_DEEPSEEK"
+            print(f"[STAGE 6: deepseek-analyst] fallback succeeded")
+        except Exception as e2:
+            print(f"[STAGE 6: deepseek-analyst] also failed: {e2} -- BOTH_DOWN")
+            return {"skip": "both_apis_down"}
 
     if haiku_output:
-        print(f"[STAGE 6: haiku] tradeable={haiku_output.get('tradeable')}, bias={haiku_output.get('directional_bias')}, conf={haiku_output.get('confidence')}")
+        print(f"[STAGE 6: {'haiku' if fallback_mode is None else 'deepseek-analyst'}] tradeable={haiku_output.get('tradeable')}, bias={haiku_output.get('directional_bias')}, conf={haiku_output.get('confidence')}")
 
-    # Early-skip on Haiku tradeable=False
+    # Early-skip on analyst tradeable=False
     if haiku_output and not haiku_output.get("tradeable"):
         return {"skip": "haiku_not_tradeable", "haiku": haiku_output, "fallback_mode": None}
 
-    # --- Step 7: DeepSeek verifier with Tier-2F prompt ---
-    try:
-        flash_output = run_verifier(context, haiku_output, prompt_template=TIER2F_VERIFIER_PROMPT)
-    except Exception as e:
-        print(f"[STAGE 7: flash] failed: {e} -- entering {'SOLO_HAIKU' if haiku_output else 'BOTH_DOWN'} fallback")
-        fallback_mode = "SOLO_HAIKU" if haiku_output else "BOTH_DOWN"
+    # --- Step 7: DeepSeek verifier — only for consensus path (Haiku succeeded) ---
+    if fallback_mode is None:
+        try:
+            flash_output = run_verifier(context, haiku_output, prompt_template=TIER2F_VERIFIER_PROMPT)
+        except Exception as e:
+            print(f"[STAGE 7: flash] failed: {e} -- entering SOLO_HAIKU fallback")
+            fallback_mode = "SOLO_HAIKU"
 
     if flash_output:
         print(f"[STAGE 7: flash] verdict={flash_output.get('verdict')}, agreement={flash_output.get('agreement_score')}, bias={flash_output.get('my_directional_bias')}, conf={flash_output.get('my_confidence')}")
 
-    if fallback_mode == "BOTH_DOWN":
-        return {"skip": "both_apis_down"}
-
     # --- Step 8: Consensus or solo decision ---
     if fallback_mode is None:
         action, reason = determine_consensus(haiku_output, flash_output)
-    elif fallback_mode == "SOLO_DEEPSEEK":
-        haircut_conf = flash_output["my_confidence"] - SOLO_MODE_HAIRCUT
-        action = "PROCEED" if haircut_conf >= AVG_CONFIDENCE_FLOOR else "SKIP"
-        reason = f"Solo DeepSeek (haircut applied), conf={haircut_conf}"
-    elif fallback_mode == "SOLO_HAIKU":
-        haircut_conf = haiku_output["confidence"] - SOLO_MODE_HAIRCUT
-        action = "PROCEED" if haircut_conf >= AVG_CONFIDENCE_FLOOR else "SKIP"
-        reason = f"Solo Haiku (haircut applied), conf={haircut_conf}"
+    else:
+        # Solo path: haiku_output is always analyst-format (Haiku or DeepSeek-as-analyst).
+        # flash_output is never used here — the solo model already rendered its verdict.
+        conf = _safe_conf(haiku_output, "confidence")
+        if conf is None:
+            action, reason = "SKIP", "Solo — missing or invalid confidence field"
+        else:
+            haircut_conf = int(conf * 0.9)
+            tradeable = haiku_output.get("tradeable", False)
+            if tradeable and haircut_conf >= AVG_CONFIDENCE_FLOOR:
+                action = "PROCEED"
+                reason = f"Solo {fallback_mode} (0.9x haircut), conf={haircut_conf}"
+            else:
+                action = "SKIP"
+                reason = (
+                    f"Solo {fallback_mode} — confidence {haircut_conf} < {AVG_CONFIDENCE_FLOOR}"
+                    if tradeable else "Analyst says not tradeable"
+                )
 
     print(f"[STAGE 8: consensus] action={action}, reason={reason}, fallback_mode={fallback_mode}")
 
@@ -359,12 +372,9 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     # ==================================================================
 
     # --- Determine direction + advisory stop-loss ---
-    if fallback_mode == "SOLO_DEEPSEEK":
-        direction_bias = flash_output["my_directional_bias"]
-        analyst_sl_pct = 5.0
-    else:
-        direction_bias = haiku_output["directional_bias"]
-        analyst_sl_pct = haiku_output.get("stop_loss_pct", 5.0)
+    # All paths: haiku_output is always analyst-format at this point.
+    direction_bias = haiku_output.get("directional_bias", "NEUTRAL")
+    analyst_sl_pct = haiku_output.get("stop_loss_pct", 5.0)
 
     if direction_bias == "NEUTRAL":
         return {"skip": "neutral_bias_no_trade"}
@@ -372,11 +382,16 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
 
     # --- Compute average confidence + conviction ---
     if fallback_mode is None:
+        # Consensus path: both models succeeded; determine_consensus already
+        # validated the confidence fields — safe to use bracket access.
         avg_conf = (haiku_output["confidence"] + flash_output["my_confidence"]) / 2
-    elif fallback_mode == "SOLO_DEEPSEEK":
-        avg_conf = flash_output["my_confidence"] - SOLO_MODE_HAIRCUT
-    else:   # SOLO_HAIKU
-        avg_conf = haiku_output["confidence"] - SOLO_MODE_HAIRCUT
+    else:
+        # Solo path: confidence from the solo analyst model with 0.9x haircut.
+        conf = _safe_conf(haiku_output, "confidence")
+        avg_conf = int(conf * 0.9) if conf else 0
+
+    # HOTFIX-5: clamp confidence to [50, 85] before conviction mapping.
+    avg_conf = max(CONFIDENCE_FLOOR, min(CONFIDENCE_CEILING, avg_conf))
 
     conviction = _confidence_to_conviction(avg_conf)
 

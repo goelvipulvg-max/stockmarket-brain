@@ -110,15 +110,16 @@ def run_verifier(context, analyst_output, prompt_template: str | None = None):
     return _retry_json(_call, label="verifier")
 
 
-def _run_deepseek_as_analyst(context):
+def _run_deepseek_as_analyst(context, prompt_template=None):
     """Solo fallback: route the analyst prompt through DeepSeek when Anthropic is down."""
+    template = prompt_template if prompt_template is not None else ANALYST_PROMPT
 
     def _call():
         response = deepseek_client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             max_tokens=600,
             temperature=0.3,
-            messages=[{"role": "user", "content": ANALYST_PROMPT.format(context=context)}],
+            messages=[{"role": "user", "content": template.format(context=context)}],
         )
         if response.choices and response.choices[0].message.content:
             return response.choices[0].message.content
