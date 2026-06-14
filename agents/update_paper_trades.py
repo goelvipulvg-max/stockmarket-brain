@@ -128,6 +128,43 @@ def compute_pnl_rs(pnl_pct, entry, qty):
     return round((pnl_pct / 100.0) * entry * qty, 2)
 
 
+def _close_expired(trade, exit_price, holding_days, now_ist):
+    """Force-close an OPEN trade as EXPIRED at exit_price.
+
+    Single source of truth for the expiry close: DB status update + capital
+    release + trade-memory outcome (all DRY_RUN-aware). Used by both the normal
+    time-stop path (exit at LTP) and the fetch-fail-at-time-stop path
+    (HOTFIX-1 / Q11=a: exit at entry_price -- the last-known price, since the
+    row carries no mark-to-market). Returns pnl_pct.
+    """
+    direction = trade.get("direction", "BUY")
+    entry = float(trade["entry_price"])
+    pnl = calc_pnl_pct(direction, entry, exit_price)
+    qty = trade.get("quantity")
+    pnl_rs = compute_pnl_rs(pnl, entry, qty)
+    update_data = {
+        "status": "EXPIRED",
+        "closed_at": now_ist.isoformat(),
+        "exit_price": exit_price,
+        "pnl_pct": pnl,
+        "pnl_rs": pnl_rs,
+    }
+    if DRY_RUN:
+        print(f"  [DRY-RUN] Would update: {update_data}")
+    else:
+        supabase.table("paper_trades").update(update_data)\
+            .eq("id", trade["id"]).execute()
+    # Phase 2: release capital on close (D3: skip NULL-quantity trades)
+    if not DRY_RUN:
+        if qty is not None:
+            release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+        else:
+            print(f"  {trade['ticker']}: pre-Phase-2 trade (no quantity), skipping ledger")
+    # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
+    update_trade_memory_outcome(supabase, trade["id"], "EXPIRED", pnl, holding_days, dry_run=DRY_RUN)
+    return pnl
+
+
 def main():
     now_ist = datetime.now(IST)
     is_market_close = now_ist.time() >= MARKET_CLOSE
@@ -148,9 +185,25 @@ def main():
         holding_days = (now_ist.date() - signal_date).days
         max_hold = trade.get("max_holding_days") or DEFAULT_HOLDING_DAYS  # per-row horizon
 
+        # ── HOTFIX-1 (P1-2): decide the time-stop BEFORE any skip/continue, so a
+        # fetch failure or a gap-WAIT hold can never swallow an expiry. ──
+        must_expire = should_force_expire(holding_days, trade.get("max_holding_days"), is_market_close)
+
         market = get_market_data(ticker)
         if market is None:
-            print(f"  {ticker}: skip (no data)")
+            if must_expire:
+                # Q11=a: no live quote on the trade's last day. Close EXPIRED at
+                # entry_price (the last-known price -- the row has no mark-to-
+                # market) => 0% P&L. Route straight to the shared expiry close;
+                # do NOT run hit detection on a fabricated quote (that would
+                # mis-fire SL_HIT for BUY winners whose trailing SL > entry).
+                exit_price = round(float(trade["entry_price"]), 2)
+                pnl = _close_expired(trade, exit_price, holding_days, now_ist)
+                closed += 1
+                print(f"  {ticker}: fetch failed at time-stop -- EXPIRED at last-known "
+                      f"{exit_price} | PnL: {pnl}%  (day {holding_days})")
+            else:
+                print(f"  {ticker}: skip (no data)")
             continue
 
         direction = trade.get("direction", "BUY")
@@ -193,46 +246,70 @@ def main():
                     print(f"  {ticker}: GAP-UP | open={market['day_open']} | "
                           f"trailing_sl → {new_trail}")
 
+        # ── HOTFIX-2 (P0-2): day-0 look-ahead guard ──
+        # get_market_data returns the FULL day's high/low (range=1d). On the
+        # entry day those span price action BEFORE the intraday entry
+        # (signal_generated_at) => look-ahead. Detect day-0 from
+        # signal_generated_at, compared in IST (fallback: signal_date when the
+        # timestamp is NULL/unparseable), and use LTP-only hit checks that day
+        # (Q7=a). hi/lo == the true day range on day-1+ (no behaviour change).
+        sig_at = trade.get("signal_generated_at")
+        entry_day = signal_date
+        if sig_at:
+            try:
+                entry_day = datetime.fromisoformat(
+                    str(sig_at).replace("Z", "+00:00")).astimezone(IST).date()
+            except (ValueError, TypeError):
+                entry_day = signal_date
+        is_day0 = (entry_day == now_ist.date())
+        hi = market["ltp"] if is_day0 else market["day_high"]
+        lo = market["ltp"] if is_day0 else market["day_low"]
+        if is_day0:
+            print(f"  {ticker}: day-0 (entry {entry_day} IST) -- LTP-only hit checks (no look-ahead)")
+
         # ── Hit detection ──
         new_status = None
         gap_exit_price = None
 
         # Target hit (checked first — both directions)
-        if direction == "BUY" and market["day_high"] >= active_target:
+        if direction == "BUY" and hi >= active_target:
             new_status = "TARGET_HIT"
-        elif direction == "SELL" and market["day_low"] <= active_target:
+        elif direction == "SELL" and lo <= active_target:
             new_status = "TARGET_HIT"
 
-        # SL check with gap protection
+        # SL check with gap protection (HOTFIX-2: hi/lo are LTP-only on day-0)
         if not new_status:
-            if direction == "BUY" and market["day_low"] <= active_sl:
+            if direction == "BUY" and lo <= active_sl:
                 mandatory_floor = round(entry * GAP_MANDATORY_EXIT, 2)
                 wait_floor = round(active_sl - (entry * GAP_WAIT_PCT), 2)
-                if market["day_low"] <= mandatory_floor:
+                if lo <= mandatory_floor:
                     new_status = "SL_HIT"
                     gap_exit_price = mandatory_floor
-                elif market["day_low"] > wait_floor:
-                    print(f"  {ticker}: GAP-DOWN WAIT | day_low={market['day_low']} "
+                elif lo > wait_floor and not must_expire:
+                    # HOTFIX-1: hold in the soft WAIT zone ONLY if not at the
+                    # time-stop; if expiring today fall through to the expiry
+                    # close below (don't let WAIT swallow the time-stop).
+                    print(f"  {ticker}: GAP-DOWN WAIT | day_low={lo} "
                           f"in WAIT zone [{wait_floor}–{active_sl}] | holding")
                     continue
-                else:
+                elif lo <= wait_floor:
                     new_status = "SL_HIT"
 
-            elif direction == "SELL" and market["day_high"] >= active_sl:
+            elif direction == "SELL" and hi >= active_sl:
                 mandatory_ceiling = round(entry * GAP_MANDATORY_CEILING, 2)
                 wait_ceiling = round(active_sl + (entry * GAP_WAIT_PCT), 2)
-                if market["day_high"] >= mandatory_ceiling:
+                if hi >= mandatory_ceiling:
                     new_status = "SL_HIT"
                     gap_exit_price = mandatory_ceiling
-                elif market["day_high"] < wait_ceiling:
-                    print(f"  {ticker}: GAP-UP WAIT (SELL) | day_high={market['day_high']} "
+                elif hi < wait_ceiling and not must_expire:
+                    print(f"  {ticker}: GAP-UP WAIT (SELL) | day_high={hi} "
                           f"in WAIT zone [{active_sl}–{wait_ceiling}] | holding")
                     continue
-                else:
+                elif hi >= wait_ceiling:
                     new_status = "SL_HIT"
 
-        # ── Expiry ──
-        if not new_status and should_force_expire(holding_days, trade.get("max_holding_days"), is_market_close):
+        # ── Expiry (time-stop) — decision hoisted to must_expire above (HOTFIX-1) ──
+        if not new_status and must_expire:
             new_status = "EXPIRED"
 
         # ── Act on result ──
@@ -371,30 +448,8 @@ def main():
 
         elif new_status == "EXPIRED":
             exit_price = market["ltp"]
-            pnl = calc_pnl_pct(direction, entry, exit_price)
-            qty = trade.get("quantity")
-            pnl_rs = compute_pnl_rs(pnl, entry, qty)
-            update_data = {
-                "status": "EXPIRED",
-                "closed_at": now_ist.isoformat(),
-                "exit_price": exit_price,
-                "pnl_pct": pnl,
-                "pnl_rs": pnl_rs,
-            }
-            if DRY_RUN:
-                print(f"  [DRY-RUN] Would update: {update_data}")
-            else:
-                supabase.table("paper_trades").update(update_data)\
-                    .eq("id", trade["id"]).execute()
+            pnl = _close_expired(trade, exit_price, holding_days, now_ist)
             closed += 1
-            # Phase 2: release capital on close (D3: skip NULL-quantity trades)
-            if not DRY_RUN:
-                if qty is not None:
-                    release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
-                else:
-                    print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
-            # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
-            update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
             print(f"  {ticker}: EXPIRED @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         else:
