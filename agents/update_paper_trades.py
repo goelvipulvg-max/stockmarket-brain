@@ -165,6 +165,45 @@ def _close_expired(trade, exit_price, holding_days, now_ist):
     return pnl
 
 
+def _compute_t1_upgrade(entry, direction, segment):
+    """Return upgrade dict for a T1→T2 transition. Pure — no I/O.
+
+    Args:
+        entry: float, entry price
+        direction: "BUY" or "SELL"
+        segment: "EQUITY" or "FNO"
+
+    Returns:
+        dict with t1_hit, current_target_level, t2_price, trailing_sl,
+        and t3_price (EQUITY only).
+    """
+    is_fno = (segment == "FNO")
+    t2_p = _dir_price(entry, (FNO_T2 if is_fno else EQ_T2), direction)
+    new_sl = _dir_price(entry, (FNO_SL_T1 if is_fno else EQ_SL_T1), direction)
+    update_data = {
+        "t1_hit": True,
+        "current_target_level": "T2",
+        "t2_price": t2_p,
+        "trailing_sl": new_sl,
+    }
+    if not is_fno:
+        update_data["t3_price"] = _dir_price(entry, EQ_T3, direction)
+    return update_data
+
+
+def _compute_t2_upgrade(entry, direction):
+    """Return upgrade dict for a T2→T3 transition (EQUITY only). Pure — no I/O.
+
+    FNO T2-hit is a final close, not an upgrade — handled inline in main().
+    """
+    trail_sl = _dir_price(entry, EQ_SL_T2, direction)
+    return {
+        "t2_hit": True,
+        "current_target_level": "T3",
+        "trailing_sl": trail_sl,
+    }
+
+
 def main():
     now_ist = datetime.now(IST)
     is_market_close = now_ist.time() >= MARKET_CLOSE
@@ -318,17 +357,7 @@ def main():
                 if t1_hit:
                     print(f"  {ticker}: T1 already processed (idempotent), skipping")
                     continue
-                is_fno = (segment == "FNO")
-                t2_p = _dir_price(entry, (FNO_T2 if is_fno else EQ_T2), direction)
-                new_sl = _dir_price(entry, (FNO_SL_T1 if is_fno else EQ_SL_T1), direction)
-                update_data = {
-                    "t1_hit": True,
-                    "current_target_level": "T2",
-                    "t2_price": t2_p,
-                    "trailing_sl": new_sl,
-                }
-                if not is_fno:
-                    update_data["t3_price"] = _dir_price(entry, EQ_T3, direction)
+                update_data = _compute_t1_upgrade(entry, direction, segment)
                 if DRY_RUN:
                     print(f"  [DRY-RUN] Would update: {update_data}")
                 else:
@@ -336,7 +365,7 @@ def main():
                         .eq("id", trade["id"]).execute()
                 upgraded += 1
                 print(f"  {ticker}: T1_HIT @ {active_target} → T2 "
-                      f"(new SL={new_sl}, T2={t2_p})  (day {holding_days})")
+                      f"(new SL={update_data['trailing_sl']}, T2={update_data['t2_price']})  (day {holding_days})")
 
             elif current_level == "T2":
                 if segment == "FNO":
@@ -372,12 +401,7 @@ def main():
                     if t2_hit:
                         print(f"  {ticker}: T2 already processed (idempotent), skipping")
                         continue
-                    trail_sl = _dir_price(entry, EQ_SL_T2, direction)
-                    update_data = {
-                        "t2_hit": True,
-                        "current_target_level": "T3",
-                        "trailing_sl": trail_sl,
-                    }
+                    update_data = _compute_t2_upgrade(entry, direction)
                     if DRY_RUN:
                         print(f"  [DRY-RUN] Would update: {update_data}")
                     else:
@@ -385,7 +409,7 @@ def main():
                             .eq("id", trade["id"]).execute()
                     upgraded += 1
                     print(f"  {ticker}: T2_HIT @ {active_target} → T3 "
-                          f"(new SL={trail_sl})  (day {holding_days})")
+                          f"(new SL={update_data['trailing_sl']})  (day {holding_days})")
 
             else:  # T3 — final exit (equity only)
                 exit_price = active_target
