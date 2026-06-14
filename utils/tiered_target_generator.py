@@ -11,8 +11,12 @@ def _dir_price(entry, mult, direction):
 def generate_targets(entry_price, direction, conviction):
     """Return {t1, t2, t3, t4, stop_loss} — all rounded to 2 decimals.
 
-    T1=3%, T2=5%, T3=10%, T4=20% (T4 only when conviction='HIGH').
-    Stop-loss: fixed 5%.
+    HOTFIX-6 (B2-validated): T1=6%, SL=4% → RR=1.5 = RR_FLOOR.
+    Previous ladder T1=3%/SL=5% (RR=0.6) was empirically wrong per
+    event_study.py Scope 2 sweep on RESULTS @ 5d (n=400).
+
+    T2=8% (minimal bump to stay above T1; not B2-validated).
+    T3=10%, T4=20% UNTOUCHED — B2 studied only T1/SL.
     """
     if entry_price <= 0:
         raise ValueError("entry_price must be positive")
@@ -22,11 +26,11 @@ def generate_targets(entry_price, direction, conviction):
         raise ValueError("conviction must be 'HIGH', 'MEDIUM', or 'LOW'")
 
     return {
-        "t1":        _dir_price(entry_price, 1.03, direction),
-        "t2":        _dir_price(entry_price, 1.05, direction),
-        "t3":        _dir_price(entry_price, 1.10, direction),
-        "t4":        _dir_price(entry_price, 1.20, direction) if conviction == "HIGH" else None,
-        "stop_loss": _dir_price(entry_price, 0.95, direction),
+        "t1":        _dir_price(entry_price, 1.06, direction),
+        "t2":        _dir_price(entry_price, 1.08, direction),
+        "t3":        _dir_price(entry_price, 1.10, direction),   # untouched — B2 did not study
+        "t4":        _dir_price(entry_price, 1.20, direction) if conviction == "HIGH" else None,  # untouched
+        "stop_loss": _dir_price(entry_price, 0.96, direction),
     }
 
 

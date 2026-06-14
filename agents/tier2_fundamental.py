@@ -374,7 +374,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
     # --- Determine direction + advisory stop-loss ---
     # All paths: haiku_output is always analyst-format at this point.
     direction_bias = haiku_output.get("directional_bias", "NEUTRAL")
-    analyst_sl_pct = haiku_output.get("stop_loss_pct", 5.0)
+    analyst_sl_pct = haiku_output.get("stop_loss_pct", 4.0)
 
     if direction_bias == "NEUTRAL":
         return {"skip": "neutral_bias_no_trade"}
