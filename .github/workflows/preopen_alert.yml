@@ -1,8 +1,9 @@
 name: Pre-Open Alert
 
 on:
-  schedule:
-    - cron: '30 3 * * 1-5'  # Mon-Fri 9:00 AM IST
+  # DEPRECATED (P3-5) — reads after_hours_queue (Neon), now empty (0 PENDING /
+  # 8 ALERTED) since the After Hours Watcher was deprecated → this no-ops.
+  # Schedule removed on 2026-06-28; kept for Phase 6 (after_hours_v2) logic salvage.
   workflow_dispatch:
 
 jobs:
