@@ -92,9 +92,49 @@ def _parse_ts(ts_val):
         return None
 
 
+_NAME_CACHE: dict[str, str | None] = {}
+
+# Trailing legal-suffix stripper so a full name ("Reliance Industries Ltd.")
+# still matches headlines that use the short form ("Reliance Industries ...").
+_LEGAL_SUFFIX_RE = re.compile(r"\s+(?:Ltd|Limited)\.?$", re.IGNORECASE)
+
+
+def _canonical_name(symbol: str) -> str | None:
+    """Resolve a symbol to the company name used for news-title matching.
+
+    Curated SYMBOL_NAME_MAP takes precedence (hand-tuned short forms); otherwise
+    derive it from Neon company_profiles.company_name with the legal suffix
+    stripped — this covers all ~505 Nifty500 names instead of the hardcoded 10
+    (P2-11b). Fail-open: returns None on miss/error, so the caller skips news
+    matching exactly as before. Cached per process.
+    """
+    sym = symbol.upper()
+    curated = SYMBOL_NAME_MAP.get(sym)
+    if curated:
+        return curated
+    if sym in _NAME_CACHE:
+        return _NAME_CACHE[sym]
+    name: str | None = None
+    try:
+        conn = get_neon_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT company_name FROM company_profiles WHERE symbol = %s",
+                (f"{sym}.NS",),
+            )
+            row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            name = _LEGAL_SUFFIX_RE.sub("", row[0]).strip() or None
+    except Exception:
+        name = None
+    _NAME_CACHE[sym] = name
+    return name
+
+
 def _matches_symbol(symbol: str, title: str) -> bool:
     """Check if title contains canonical company name for symbol (word-boundary match)."""
-    name = SYMBOL_NAME_MAP.get(symbol.upper())
+    name = _canonical_name(symbol)
     if not name:
         return False
     pattern = r'\b' + re.escape(name) + r'\b'
@@ -132,8 +172,8 @@ def fetch_recent_news(symbol: str, hours: int) -> list[dict]:
         )
     except Exception:
         return []
-    if symbol.upper() not in SYMBOL_NAME_MAP:
-        return []  # no name mapping → can't match news_log by title
+    if not _canonical_name(symbol):
+        return []  # no resolvable name → can't match news_log by title
     filtered = []
     for r in (rows or []):
         title = r.get("title") or ""
@@ -376,7 +416,7 @@ def process_position(symbol: str, market_mood: str) -> str | None:
     filings = fetch_recent_filings(symbol, LOOKBACK_HOURS)
     print(f"     News: {len(news)}, Filings: {len(filings)}")
 
-    if symbol.upper() not in SYMBOL_NAME_MAP:
+    if not _canonical_name(symbol):
         print(f"     ⚠️ No name mapping — news_log matching skipped, filings_log unaffected")
 
     news    = apply_keyword_filters(news)
