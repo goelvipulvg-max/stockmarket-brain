@@ -1,14 +1,15 @@
 name: Tier-4 Memory Manager
 
 on:
-  workflow_run:
-    workflows: ["Update Paper Trades"]
-    types: [completed]
+  # P3-6: nightly cadence (was on.workflow_run: ["Update Paper Trades"]). The agent
+  # upserts ONE idempotent trade_memory row keyed by IST date over the full resolved
+  # history, so per-updater recompute was wasteful — once nightly suffices.
+  schedule:
+    - cron: '30 15 * * 1-5'  # 20:30 IST Mon-Fri (after market close)
   workflow_dispatch:
 
 jobs:
   run-tier4:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

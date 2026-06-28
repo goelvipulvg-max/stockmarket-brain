@@ -13,7 +13,7 @@ session on a watched NSE trading day.
 | HOTFIX-6 ladder | Live in code: T1=6%, SL=4%, EQ_SL_T1=1.03, EQ_SL_T2=1.06 | `agents/update_paper_trades.py:39-41` |
 | `update_paper_trades.yml` trigger | `workflow_dispatch` ONLY — no `schedule:`, no `workflow_run:` | `.github/workflows/update_paper_trades.yml:2-3` |
 | Open positions | 0 trades open per handoff (GILLETTE id-161 EXPIRED 2026-06-13, LUPIN id-162 closed 06-08). **⚠️ VERIFY at execution time** — see Layer 4 pre-enable check. If any lingering OPEN trade exists that the handoff missed, the updater WILL manage it on first run under the new 6/4 ladder. | per handoff — cross-check with `SELECT COUNT(*) FROM paper_trades WHERE status='OPEN'` at Layer 4 |
-| Tier-3 & Tier-4 auto-trigger | Tier-3 fires `on.workflow_run: ["Tier-2F Fundamental Signal"]`; Tier-4 fires `on.workflow_run: ["Update Paper Trades"]` | `.github/workflows/tier3_position_manager.yml:13-15` + `tier4_memory_manager.yml:4-6` |
+| Tier-3 auto-trigger; Tier-4 nightly | Tier-3 fires `on.workflow_run: ["Tier-2F Fundamental Signal"]`; Tier-4 runs nightly `on.schedule` `'30 15 * * 1-5'` (20:30 IST Mon-Fri — P3-6, was `workflow_run: ["Update Paper Trades"]`) | `.github/workflows/tier3_position_manager.yml:13-15` + `tier4_memory_manager.yml:7-8` |
 
 ---
 
@@ -106,10 +106,11 @@ gh workflow enable "Tier-4 Memory Manager"         --repo goelvipulvg-max/stockm
 
 > **Note on `workflow_run` mechanics:** A `disabled_manually` workflow ignores ALL
 > triggers, including `workflow_run` upstream completions (GitHub docs: disabling
-> "stops a workflow from being triggered"). Tier-4 MUST be enabled to auto-fire when
-> the updater completes. Enabling it here is harmless — it sits idle until Layer 4
-> produces an updater run. Same applies to Tier-3 (enabled in Layer 1, fires when
-> Tier-2F completes in Layer 5).
+> "stops a workflow from being triggered"). This applies to Tier-3 (enabled in Layer 1,
+> fires when Tier-2F completes in Layer 5) — it MUST be enabled to auto-fire. Tier-4 is
+> now nightly-scheduled (P3-6, not `workflow_run`); enabling it here is harmless — it
+> only recomputes the `trade_memory` aggregate at the next 20:30 IST slot (no trading),
+> independent of the updater.
 
 #### Before enabling
 
@@ -121,7 +122,7 @@ gh workflow enable "Tier-4 Memory Manager"         --repo goelvipulvg-max/stockm
 |----------|--------------|-------|----------------|
 | `filing-memory-sync.yml` | Sync run log | GH Actions log (`gh run list --workflow="Filing Memory Sync"`) | "Found N material filings" or "No material filings in window." Runs every 10 min. Silence → check GH for failures. |
 | `filing-memory-backfill.yml` | Backfill run log | GH Actions log (`gh run list --workflow="Filing Memory Backfill"`) | Runs once daily at 00:30 IST. Won't fire during daytime resume. |
-| `tier4_memory_manager.yml` | `trade_memory_v2` updates | GH Actions log (auto-fires on updater completion) | Won't fire until Layer 4. Verify workflow is `active` in listing. |
+| `tier4_memory_manager.yml` | `trade_memory` upsert | GH Actions log (`gh run list --workflow="Tier-4 Memory Manager"`) | Runs nightly 20:30 IST Mon-Fri (P3-6) — once enabled, fires on the next 20:30 slot, independent of the updater. Verify workflow is `active` in listing. |
 
 #### GO / NO-GO gate
 
