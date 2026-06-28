@@ -2,7 +2,8 @@ name: Health Monitor
 
 on:
   schedule:
-    - cron: '30 3 * * 1-5'  # Mon-Fri 9:00 AM IST (UTC+5:30)
+    - cron: '30 3 * * 1-5'    # 09:00 IST Mon-Fri — morning checks (2-6); Tier-0 stall check dormant pre-open (9:15)
+    - cron: '30 4-9 * * 1-5'  # 10:00-15:00 IST hourly — live Tier-0 stall check (P2-8; is_market_open gated)
   workflow_dispatch:
 
 jobs:
