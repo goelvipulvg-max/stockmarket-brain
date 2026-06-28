@@ -1,23 +1,28 @@
 """
-Daily Portfolio Snapshot — Phase 2, v3.1 Master Plan §5.4 (last bullet).
-INSERTs a fresh portfolio row each call — builds the equity-curve history.
-Distinct from _update_portfolio() which UPDATEs the single current row (D2).
+Daily Portfolio Snapshot — equity-curve history for Tier-4 / backtest (P2-9).
 
-Trigger: manual / cron-job.org (D5 — cron NOT wired in Phase 2).
+Writes one row per trading day to the dedicated append-only `portfolio_snapshots`
+table. Kept SEPARATE from the single live `portfolio` row so snapshots are never
+mutated by later trades and never shadow get_current_portfolio() (which selects
+the live row by max id). Idempotent per day via upsert on snapshot_date.
+
+Trigger: .github/workflows/portfolio_snapshot.yml (daily, after market close).
 """
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from utils.supabase_client import get_client
 from utils.capital_ledger import get_current_portfolio
 
+IST = ZoneInfo("Asia/Kolkata")
 sb = get_client()
 
 
 def snapshot_portfolio():
-    """INSERT a new portfolio row capturing the current state."""
+    """Upsert today's portfolio equity snapshot into portfolio_snapshots."""
     pf = get_current_portfolio()
 
     snapshot = {
-        "snapshot_date": datetime.now().date().isoformat(),
+        "snapshot_date": datetime.now(IST).date().isoformat(),
         "starting_capital": pf["starting_capital"],
         "cash_available": pf["cash_available"],
         "capital_deployed": pf["capital_deployed"],
@@ -27,9 +32,15 @@ def snapshot_portfolio():
         "open_positions": pf["open_positions"],
     }
 
-    result = sb.table("portfolio").insert(snapshot).execute()
+    # P2-9: idempotent per day -- a same-day re-run overwrites that snapshot_date
+    # row instead of duplicating (relies on UNIQUE(snapshot_date)).
+    result = (
+        sb.table("portfolio_snapshots")
+        .upsert(snapshot, on_conflict="snapshot_date")
+        .execute()
+    )
     row = result.data[0] if result.data else snapshot
-    print(f"Portfolio snapshot: id={row['id']} date={row['snapshot_date']} "
+    print(f"Portfolio snapshot: id={row.get('id')} date={row['snapshot_date']} "
           f"equity=₹{float(row['total_equity']):,.2f} "
           f"cash=₹{float(row['cash_available']):,.2f} "
           f"deployed=₹{float(row['capital_deployed']):,.2f}")

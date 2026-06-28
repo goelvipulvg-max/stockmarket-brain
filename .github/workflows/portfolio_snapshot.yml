@@ -1,0 +1,31 @@
+name: Portfolio Snapshot
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5'   # 16:00 IST Mon-Fri — EOD equity snapshot (after 15:30 close + update_paper_trades)
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run portfolio_snapshot (append-only equity curve -> portfolio_snapshots)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -u -m agents.portfolio_snapshot
