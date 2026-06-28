@@ -2,8 +2,12 @@ name: Nifty 500 Loader
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 2 1 1,4,7,10 *'
+  # schedule DISABLED (P2-10): the quarterly auto-run reloads the AVOID-listed
+  # Nifty500 membership snapshot, which clobbers survivorship (B1) work. Run
+  # manually via workflow_dispatch only. To restore, uncomment below.
+  # Original cron (next fire was Jul 1): '0 2 1 1,4,7,10 *'
+  # schedule:
+  #   - cron: '0 2 1 1,4,7,10 *'
 
 jobs:
   load-nifty500:
