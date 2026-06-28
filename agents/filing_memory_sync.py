@@ -1,7 +1,7 @@
 """Phase 0.7 — filing_memory_sync: live sync of material filings_log rows into filing_memory.
 
 Runs on a 10-min cron during NSE market hours. Queries filings_log for rows
-classified in the last 20 minutes (material_score >= 6, event_type != OTHER),
+classified in the last 45 minutes (material_score >= 6, event_type != OTHER),
 looks up sector from Neon company_profiles, and inserts into filing_memory.
 url_hash UNIQUE constraint provides idempotency on re-runs.
 """
@@ -14,7 +14,10 @@ load_dotenv(override=True)
 from utils.supabase_client import get_client
 from utils.neon_client import get_neon_connection
 
-WINDOW_MINUTES = 20
+# 10-min cron with a 45-min lookback => each filing is seen by ~4 consecutive
+# runs, so a delayed/skipped GitHub cron run (jitter up to ~35 min) still catches
+# it. Dedup via url_hash; the daily filings_log_backfill sweep backstops the rest.
+WINDOW_MINUTES = 45  # P2-3: widened from 20 (late filings were being dropped)
 
 
 def lookup_sector(symbol: str) -> str | None:

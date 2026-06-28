@@ -1,0 +1,36 @@
+name: Filings Log Backfill
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily safety-net sweep at 14:30 UTC = 20:00 IST, Mon-Fri.
+    # Sweeps ALL material filings_log rows (material_score>=6, event_type!=OTHER)
+    # into filing_memory via upsert on url_hash, catching anything the real-time
+    # 10-min sync missed. Runs BEFORE the 19:00 UTC (00:30 IST) filing_memory
+    # outcome backfill so freshly-swept rows get base_price the same night.
+    - cron: '30 14 * * 1-5'
+
+jobs:
+  run-backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
+          echo "NEON_CONNECTION_STRING=${{ secrets.NEON_CONNECTION_STRING }}" >> .env
+
+      - name: Run Filings Log Backfill
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python agents/filings_log_backfill.py
