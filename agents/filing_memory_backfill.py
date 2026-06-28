@@ -14,6 +14,12 @@ from utils.trading_calendar import today, next_trading_day, add_trading_days
 
 IST = ZoneInfo("Asia/Kolkata")
 
+# P2-2: a FAILED outcome window older than this many days is treated as a
+# permanent data-desert (delisted / no Yahoo data) and marked ABANDONED, so it
+# stops being retried on every run. Below this age, FAILED windows are retried
+# (most failures are transient yfinance flakes and resolve once data appears).
+ABANDON_AFTER_DAYS = 90
+
 
 def _now_iso():
     return datetime.now(IST).isoformat()
@@ -212,19 +218,20 @@ def backfill_outcome_windows():
 
     WINDOWS = (5, 10, 30)
 
-    # 1. Read rows with base_price populated + any PENDING outcomes
+    # 1. Read rows with base_price populated + any PENDING/FAILED outcomes
+    #    P2-2: FAILED included so transiently-failed windows get retried.
     resp = (
         sb.table("filing_memory")
         .select("id,symbol_base,filing_date,base_price,nifty_base,"
                 "outcome_5d_status,outcome_10d_status,outcome_30d_status")
         .not_.is_("base_price", "null")
-        .or_("outcome_5d_status.eq.PENDING,"
-             "outcome_10d_status.eq.PENDING,"
-             "outcome_30d_status.eq.PENDING")
+        .or_("outcome_5d_status.eq.PENDING,outcome_5d_status.eq.FAILED,"
+             "outcome_10d_status.eq.PENDING,outcome_10d_status.eq.FAILED,"
+             "outcome_30d_status.eq.PENDING,outcome_30d_status.eq.FAILED")
         .execute()
     )
     rows = resp.data or []
-    print(f"Rows with base_price set + any PENDING window: {len(rows)}")
+    print(f"Rows with base_price set + any PENDING/FAILED window: {len(rows)}")
 
     if not rows:
         print("[SKIP] No rows with PENDING outcome windows.")
@@ -241,9 +248,14 @@ def backfill_outcome_windows():
             return fd.date()
         return fd
 
-    # ripe_entries: one per (row, window) that is PENDING and mature
+    # ripe_entries: one per (row, window) that is PENDING/FAILED and mature.
+    # P2-2: FAILED windows are retried; a FAILED window whose target is older
+    # than ABANDON_AFTER_DAYS is a permanent data-desert -> marked ABANDONED so
+    # it stops being retried on every run.
     ripe_entries = []
     skipped = {5: 0, 10: 0, 30: 0}
+    abandoned = {5: 0, 10: 0, 30: 0}
+    abandon_updates = defaultdict(dict)  # row_id -> {status_col: "ABANDONED"}
 
     for r in rows:
         fd = _filing_date(r)
@@ -255,11 +267,17 @@ def backfill_outcome_windows():
 
         for N in WINDOWS:
             status_col = f"outcome_{N}d_status"
-            if r.get(status_col) != "PENDING":
+            st = r.get(status_col)
+            if st not in ("PENDING", "FAILED"):
                 continue
             target_date = add_trading_days(fd, N)
             if target_date >= today_date:
                 skipped[N] += 1
+                continue
+            # P2-2: permanently-stuck FAILED window -> terminal ABANDONED
+            if st == "FAILED" and (today_date - target_date).days > ABANDON_AFTER_DAYS:
+                abandon_updates[r["id"]][status_col] = "ABANDONED"
+                abandoned[N] += 1
                 continue
             ripe_entries.append({
                 "row_id": r["id"],
@@ -270,6 +288,21 @@ def backfill_outcome_windows():
                 "base_date": base_date,
                 "target_date": target_date,
             })
+
+    # P2-2: persist ABANDONED marks now -- independent of the ripe / early-return
+    # path below, so stale deserts are retired even when nothing is ripe.
+    abandoned_rows = 0
+    if abandon_updates:
+        for row_id, updates in abandon_updates.items():
+            updates["updated_at"] = _now_iso()
+            try:
+                sb.table("filing_memory").update(updates).eq("id", row_id).execute()
+                abandoned_rows += 1
+            except Exception as e:
+                print(f"[WARN] ABANDONED update failed for id={row_id}: {type(e).__name__}: {e}")
+        print(f"Abandoned (FAILED older than {ABANDON_AFTER_DAYS}d): "
+              f"5d={abandoned[5]}, 10d={abandoned[10]}, 30d={abandoned[30]} "
+              f"across {abandoned_rows} rows")
 
     total_ripe = len(ripe_entries)
     print(f"Ripe windows: {total_ripe}")
@@ -412,10 +445,12 @@ def backfill_outcome_windows():
     print("=" * 60)
     print("Pass 2 Summary")
     print("=" * 60)
-    print(f"  Rows read (base_price set + PENDING):  {len(rows)}")
-    print(f"  Rows updated:                           {rows_updated}")
+    print(f"  Rows read (base_price set + PENDING/FAILED):  {len(rows)}")
+    print(f"  Rows updated:                                  {rows_updated}")
+    print(f"  Rows abandoned (stale FAILED):                 {abandoned_rows}")
     for N in WINDOWS:
-        print(f"  {N}d: FILLED={filled[N]}, FAILED={failed[N]}, skipped-immature={skipped[N]}")
+        print(f"  {N}d: FILLED={filled[N]}, FAILED={failed[N]}, "
+              f"ABANDONED={abandoned[N]}, skipped-immature={skipped[N]}")
     print(f"  Fetch failed (symbol-level):             {fetch_failed_count}")
     print(f"  Lookup failed (date-level):              {lookup_failed_count}")
     print(f"  swing_verdict (this run):               POSITIVE={verdict_dist['POSITIVE']}, NEGATIVE={verdict_dist['NEGATIVE']}, NEUTRAL={verdict_dist['NEUTRAL']}")
