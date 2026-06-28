@@ -202,13 +202,18 @@ def two_source_gate(news: list[dict], filings: list[dict]) -> tuple:
 # ── Company Context ────────────────────────────────────────────────────────────
 
 def fetch_company_context(symbol: str) -> dict | None:
-    """Pull business_summary and risk_factors from Neon company_profiles."""
+    """Pull business_summary and risk_factors from Neon company_profiles.
+
+    company_profiles stores symbols WITH the .NS suffix (493/505), but held
+    positions arrive .NS-stripped (get_held_positions); append .NS before the
+    lookup or it always returns None (P2-11a). Mirrors neon_fundamentals.py.
+    """
     try:
         conn = get_neon_connection()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 "SELECT business_summary, risk_factors FROM company_profiles WHERE symbol = %s",
-                (symbol.upper(),)
+                (f"{symbol.upper()}.NS",)
             )
             row = cur.fetchone()
         conn.close()
