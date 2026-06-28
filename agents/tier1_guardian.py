@@ -418,7 +418,8 @@ def process_position(symbol: str, market_mood: str) -> str | None:
     )
 
     sources_list = list(set(
-        [n.get("source", "?") for n in (news or [])] + ["NSE_FILING"]
+        [n.get("source", "?") for n in (news or [])]
+        + (["NSE_FILING"] if filings else [])
     ))
 
     telegram_ok = send_guardian_telegram(
