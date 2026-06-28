@@ -16,20 +16,28 @@ import pandas_market_calendars as mcal
 
 IST = ZoneInfo("Asia/Kolkata")
 
+# History floor for the cached schedule. B1 survivorship backfill resolves
+# 2024-25 historical filing/exit dates, which the old current-year-only start
+# silently mis-classified as non-trading days (P2-5). Bump if backfill predates.
+_HISTORY_START_YEAR = 2024
+
 _calendar = mcal.get_calendar("NSE")
 _schedule: pd.DataFrame | None = None
 _schedule_end_year: int | None = None
 
 
 def _ensure_schedule():
-    """Pre-compute schedule through end of next calendar year, cached."""
+    """Pre-compute schedule from _HISTORY_START_YEAR through end of next
+    calendar year, cached. The wide start covers historical backfill (2024+,
+    P2-5) as well as the forward horizon; queries for any single date are
+    unaffected by the extra years in the index."""
     global _schedule, _schedule_end_year
     this_year = datetime.now(IST).year
     needed = this_year + 1  # cover current + next year
     if _schedule is not None and _schedule_end_year == needed:
         return
     _schedule = _calendar.schedule(
-        start_date=date(this_year, 1, 1),
+        start_date=date(_HISTORY_START_YEAR, 1, 1),
         end_date=date(needed + 1, 1, 1),
     )
     _schedule_end_year = needed
