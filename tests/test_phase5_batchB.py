@@ -126,3 +126,56 @@ def test_V5_7b_tier3_allows_different_source_same_ticker():
     if passed is False:
         assert "duplicate" not in str(reason).lower(), \
             f"Different-source should NOT be blocked by duplicate rule. Got: {reason}"
+
+
+# ============================================================
+# P2-14 -- mark-before-dispatch ordering + rollback (race fix)
+# ============================================================
+
+def test_P2_14_mark_failure_skips_dispatch(monkeypatch):
+    """If _mark_picked fails, _dispatch_tier2f must NOT run (no duplicate re-dispatch).
+
+    Regression for P2-14: pre-fix the poller dispatched BEFORE marking, so a mark
+    failure left the filing unpicked and it re-dispatched next cycle (duplicate trade).
+    Mark-first means a mark failure short-circuits dispatch entirely.
+    """
+    dispatch_calls = []
+    def fake_dispatch(filing_id):
+        dispatch_calls.append(filing_id)
+        return True
+
+    monkeypatch.setattr(p_module, '_query_pending_filings',
+                        lambda: [{'id': 4201, 'symbol': 'P214A'}])
+    monkeypatch.setattr(p_module, '_mark_picked', lambda fid: False)
+    monkeypatch.setattr(p_module, '_dispatch_tier2f', fake_dispatch)
+
+    exit_code = tier0f_main(dry_run=False)
+
+    assert dispatch_calls == [], \
+        f"Dispatch must NOT fire when mark fails. Got: {dispatch_calls}"
+    assert exit_code == 1, "Poller should report partial failure (exit 1) on mark failure"
+
+
+def test_P2_14_dispatch_failure_rolls_back_mark(monkeypatch):
+    """If dispatch fails after a successful mark, _unmark_picked must roll it back.
+
+    Prevents a silent drop: a marked-but-undispatched filing is invisible to
+    health_monitor's picked_by_tier0f=false backlog check, so it must be un-marked
+    to retry next cycle.
+    """
+    unmark_calls = []
+    def fake_unmark(filing_id):
+        unmark_calls.append(filing_id)
+        return True
+
+    monkeypatch.setattr(p_module, '_query_pending_filings',
+                        lambda: [{'id': 4202, 'symbol': 'P214B'}])
+    monkeypatch.setattr(p_module, '_mark_picked', lambda fid: True)
+    monkeypatch.setattr(p_module, '_dispatch_tier2f', lambda fid: False)
+    monkeypatch.setattr(p_module, '_unmark_picked', fake_unmark)
+
+    exit_code = tier0f_main(dry_run=False)
+
+    assert unmark_calls == [4202], \
+        f"Failed dispatch must roll back the mark. Got: {unmark_calls}"
+    assert exit_code == 1, "Poller should report partial failure (exit 1) on dispatch failure"

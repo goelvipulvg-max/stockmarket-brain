@@ -127,6 +127,22 @@ def _mark_picked(filing_id: int) -> bool:
         return False
 
 
+def _unmark_picked(filing_id: int) -> bool:
+    """Compensating rollback of _mark_picked -- resets picked_by_tier0f=false and
+    clears picked_at so a dispatch-failed filing retries next cycle instead of
+    being silently dropped. Returns True on success."""
+    sb = get_client()
+    try:
+        sb.table('filings_log').update({
+            'picked_by_tier0f': False,
+            'picked_at': None,
+        }).eq('id', filing_id).execute()
+        return True
+    except Exception as e:
+        log.error(f"Unmark failed for filing_id={filing_id}: {e}")
+        return False
+
+
 def main(dry_run: bool = False) -> int:
     """Main poller entry point. Returns exit code (0 success, 1 partial failure)."""
     log.info(f"Tier-0F poller starting (dry_run={dry_run})")
@@ -150,11 +166,24 @@ def main(dry_run: bool = False) -> int:
             success_count += 1
             continue
 
-        if _dispatch_tier2f(fid) and _mark_picked(fid):
+        # P2-14: mark BEFORE dispatch so a mark failure can never trigger a
+        # re-dispatch (duplicate trade). If the mark fails, skip dispatch -- the
+        # row stays unpicked and retries cleanly next cycle (nothing dispatched).
+        if not _mark_picked(fid):
+            fail_count += 1
+            log.warning(f"Mark failed, skipped dispatch for filing_id={fid} (retries next cycle)")
+            continue
+
+        if _dispatch_tier2f(fid):
             success_count += 1
         else:
+            # Dispatch definitively failed (non-204 / exception => workflow NOT
+            # triggered). Roll back the optimistic mark so the row retries next
+            # cycle rather than being silently dropped (invisible to the
+            # health_monitor picked_by_tier0f=false backlog check).
+            _unmark_picked(fid)
             fail_count += 1
-            log.warning(f"Failed to dispatch+mark filing_id={fid}")
+            log.error(f"Dispatch failed after mark; rolled back pick for filing_id={fid}")
 
     log.info(f"Poller complete: {success_count} success, {fail_count} failed")
     return 0 if fail_count == 0 else 1
