@@ -31,7 +31,7 @@ from utils.telegram_client import send_message
 from utils.supabase_client import get_client
 from utils.trade_memory_writer import build_live_trade_memory_row, insert_live_trade_memory
 
-load_dotenv()
+load_dotenv(override=True)
 
 REQUIRED_ENVS = [
     "ANTHROPIC_API_KEY",
