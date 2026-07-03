@@ -13,6 +13,7 @@ from utils.pdf_parser import download_and_parse_nse_pdf, get_pdf_context_summary
 from utils.gap_calculator import calculate_expected_gap
 from utils.nse_dates import parse_nse_datetime
 import utils.questdb_client as questdb_client
+from utils.json_extract import extract_json
 
 # Feature flag: switch dedup key between legacy (symbol-URL) and new
 # composite (symbol|seq_id). Default false = legacy behavior preserved.
@@ -123,15 +124,15 @@ def classify_filing(filing, pdf_summary=None, max_retries=2):
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
-        text = resp.choices[0].message.content.strip().replace("```json","").replace("```","").replace("{{","{").replace("}}","}").strip()
-        if not text:
+        raw_text = resp.choices[0].message.content.strip()
+        if not raw_text:
             if attempt < max_retries:
                 print(f"     [WARN] classify_filing attempt {attempt+1}: empty response, retrying...")
                 time.sleep(2)
                 continue
             raise ValueError("Empty response after retries")
         try:
-            parsed = json.loads(text)
+            parsed = extract_json(raw_text)
             event_type = parsed.get("event_type", "OTHER")
             if event_type not in VALID_EVENT_TYPES:
                 print(f"     [WARN] unknown event_type '{event_type}' coerced to OTHER")

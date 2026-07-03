@@ -13,6 +13,8 @@ from openai import OpenAI
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
+from utils.json_extract import extract_json
+
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 
@@ -46,13 +48,8 @@ def _retry_json(call_fn, label="model", max_retries=2):
                 continue
             raise ValueError(f"{label}: empty response after {max_retries+1} attempts")
 
-        text = raw.strip()
-        text = text.replace("```json", "").replace("```", "")
-        text = text.replace("{{", "{").replace("}}", "}")
-        text = text.strip()
-
         try:
-            return json.loads(text)
+            return extract_json(raw)
         except json.JSONDecodeError as e:
             last_error = e
             if attempt < max_retries:
