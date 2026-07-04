@@ -505,7 +505,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
         "horizon": horizon,
         "max_holding_days": HORIZON_TO_DAYS.get(horizon, 10),
         "status": "OPEN",
-        "raw_signal": json.dumps({
+        "raw_signal": {
             "haiku": haiku_output,
             "flash": flash_output,
             "fallback_mode": fallback_mode,
@@ -522,7 +522,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
                 "sector": context["sector"],
                 "nifty_mood": context["nifty_mood"],
             },
-        }),
+        },
     }
 
     try:
@@ -622,12 +622,12 @@ def _insert_disagreement(filing, haiku, flash, reason) -> int:
             "final_action": None,
             "backtest_outcome": None,
             "actual_price_move_pct": None,
-            "full_context": json.dumps({
+            "full_context": {
                 "haiku": haiku,
                 "flash": flash,
                 "reason": reason,
                 "filing_summary": filing.get("summary"),
-            }),
+            },
         }
         inserted = sb.table("agent_disagreements").insert(row).execute().data[0]
         print(f"[disagreement] logged id={inserted['id']} ticker={filing['symbol']} reason={reason}")
