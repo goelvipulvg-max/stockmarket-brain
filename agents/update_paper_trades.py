@@ -128,14 +128,19 @@ def compute_pnl_rs(pnl_pct, entry, qty):
     return round((pnl_pct / 100.0) * entry * qty, 2)
 
 
-def _close_expired(trade, exit_price, holding_days, now_ist):
-    """Force-close an OPEN trade as EXPIRED at exit_price.
+def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
+                 extra_fields=None):
+    """Close an OPEN trade with an idempotent, atomic status transition (P2-7).
 
-    Single source of truth for the expiry close: DB status update + capital
-    release + trade-memory outcome (all DRY_RUN-aware). Used by both the normal
-    time-stop path (exit at LTP) and the fetch-fail-at-time-stop path
-    (HOTFIX-1 / Q11=a: exit at entry_price -- the last-known price, since the
-    row carries no mark-to-market). Returns pnl_pct.
+    Single source of truth for ALL final-close routes (EXPIRED / TARGET_HIT /
+    SL_HIT): DB status update + capital release + trade-memory outcome (all
+    DRY_RUN-aware). The UPDATE carries .eq("status", "OPEN"), so with two
+    overlapping updater runs only one run's UPDATE matches the row; the loser
+    gets no rows back and skips release_capital + the memory write — capital
+    can never be released twice for the same trade.
+
+    Returns pnl_pct when this run closed the trade (or in DRY_RUN), None when
+    another run already closed it.
     """
     direction = trade.get("direction", "BUY")
     entry = float(trade["entry_price"])
@@ -143,26 +148,42 @@ def _close_expired(trade, exit_price, holding_days, now_ist):
     qty = trade.get("quantity")
     pnl_rs = compute_pnl_rs(pnl, entry, qty)
     update_data = {
-        "status": "EXPIRED",
+        "status": new_status,
         "closed_at": now_ist.isoformat(),
         "exit_price": exit_price,
         "pnl_pct": pnl,
         "pnl_rs": pnl_rs,
     }
+    if extra_fields:
+        update_data.update(extra_fields)
     if DRY_RUN:
         print(f"  [DRY-RUN] Would update: {update_data}")
     else:
-        supabase.table("paper_trades").update(update_data)\
-            .eq("id", trade["id"]).execute()
-    # Phase 2: release capital on close (D3: skip NULL-quantity trades)
-    if not DRY_RUN:
+        result = supabase.table("paper_trades").update(update_data)\
+            .eq("id", trade["id"]).eq("status", "OPEN").execute()
+        if not result.data:
+            print(f"  {trade['ticker']}: already closed by another run -- "
+                  f"skipping capital release (id={trade['id']})")
+            return None
+        # Phase 2: release capital on close (D3: skip NULL-quantity trades)
         if qty is not None:
             release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
         else:
             print(f"  {trade['ticker']}: pre-Phase-2 trade (no quantity), skipping ledger")
     # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
-    update_trade_memory_outcome(supabase, trade["id"], "EXPIRED", pnl, holding_days, dry_run=DRY_RUN)
+    update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
     return pnl
+
+
+def _close_expired(trade, exit_price, holding_days, now_ist):
+    """Force-close an OPEN trade as EXPIRED at exit_price.
+
+    Thin wrapper over _close_trade (P2-7) — kept for the two expiry call
+    sites (normal time-stop at LTP + HOTFIX-1/Q11=a fetch-fail at entry
+    price) and the existing direct-call tests. Returns pnl_pct, or None if
+    another run already closed the trade.
+    """
+    return _close_trade(trade, "EXPIRED", exit_price, holding_days, now_ist)
 
 
 def _compute_t1_upgrade(entry, direction, segment):
@@ -238,9 +259,10 @@ def main():
                 # mis-fire SL_HIT for BUY winners whose trailing SL > entry).
                 exit_price = round(float(trade["entry_price"]), 2)
                 pnl = _close_expired(trade, exit_price, holding_days, now_ist)
-                closed += 1
-                print(f"  {ticker}: fetch failed at time-stop -- EXPIRED at last-known "
-                      f"{exit_price} | PnL: {pnl}%  (day {holding_days})")
+                if pnl is not None:
+                    closed += 1
+                    print(f"  {ticker}: fetch failed at time-stop -- EXPIRED at last-known "
+                          f"{exit_price} | PnL: {pnl}%  (day {holding_days})")
             else:
                 print(f"  {ticker}: skip (no data)")
             continue
@@ -281,7 +303,7 @@ def main():
                         print(f"  [DRY-RUN] Would update: {update_data}")
                     else:
                         supabase.table("paper_trades").update(update_data)\
-                            .eq("id", trade["id"]).execute()
+                            .eq("id", trade["id"]).eq("status", "OPEN").execute()
                     print(f"  {ticker}: GAP-UP | open={market['day_open']} | "
                           f"trailing_sl → {new_trail}")
 
@@ -362,7 +384,7 @@ def main():
                     print(f"  [DRY-RUN] Would update: {update_data}")
                 else:
                     supabase.table("paper_trades").update(update_data)\
-                        .eq("id", trade["id"]).execute()
+                        .eq("id", trade["id"]).eq("status", "OPEN").execute()
                 upgraded += 1
                 print(f"  {ticker}: T1_HIT @ {active_target} → T2 "
                       f"(new SL={update_data['trailing_sl']}, T2={update_data['t2_price']})  (day {holding_days})")
@@ -370,33 +392,13 @@ def main():
             elif current_level == "T2":
                 if segment == "FNO":
                     exit_price = active_target
-                    pnl = calc_pnl_pct(direction, entry, exit_price)
-                    qty = trade.get("quantity")
-                    pnl_rs = compute_pnl_rs(pnl, entry, qty)
-                    update_data = {
-                        "status": "TARGET_HIT",
-                        "closed_at": now_ist.isoformat(),
-                        "exit_price": exit_price,
-                        "pnl_pct": pnl,
-                        "pnl_rs": pnl_rs,
-                        "t2_hit": True,
-                    }
-                    if DRY_RUN:
-                        print(f"  [DRY-RUN] Would update: {update_data}")
-                    else:
-                        supabase.table("paper_trades").update(update_data)\
-                            .eq("id", trade["id"]).execute()
-                    closed += 1
-                    # Phase 2: release capital on close (D3: skip NULL-quantity trades)
-                    if not DRY_RUN:
-                        if qty is not None:
-                            release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
-                        else:
-                            print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
-                    # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
-                    update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
-                    print(f"  {ticker}: T2_HIT (FNO) @ {exit_price} | PnL: {pnl}% | "
-                          f"CLOSED  (day {holding_days})")
+                    pnl = _close_trade(trade, "TARGET_HIT", exit_price,
+                                       holding_days, now_ist,
+                                       extra_fields={"t2_hit": True})
+                    if pnl is not None:
+                        closed += 1
+                        print(f"  {ticker}: T2_HIT (FNO) @ {exit_price} | PnL: {pnl}% | "
+                              f"CLOSED  (day {holding_days})")
                 else:
                     if t2_hit:
                         print(f"  {ticker}: T2 already processed (idempotent), skipping")
@@ -406,75 +408,35 @@ def main():
                         print(f"  [DRY-RUN] Would update: {update_data}")
                     else:
                         supabase.table("paper_trades").update(update_data)\
-                            .eq("id", trade["id"]).execute()
+                            .eq("id", trade["id"]).eq("status", "OPEN").execute()
                     upgraded += 1
                     print(f"  {ticker}: T2_HIT @ {active_target} → T3 "
                           f"(new SL={update_data['trailing_sl']})  (day {holding_days})")
 
             else:  # T3 — final exit (equity only)
                 exit_price = active_target
-                pnl = calc_pnl_pct(direction, entry, exit_price)
-                qty = trade.get("quantity")
-                pnl_rs = compute_pnl_rs(pnl, entry, qty)
-                update_data = {
-                    "status": "TARGET_HIT",
-                    "closed_at": now_ist.isoformat(),
-                    "exit_price": exit_price,
-                    "pnl_pct": pnl,
-                    "pnl_rs": pnl_rs,
-                }
-                if DRY_RUN:
-                    print(f"  [DRY-RUN] Would update: {update_data}")
-                else:
-                    supabase.table("paper_trades").update(update_data)\
-                        .eq("id", trade["id"]).execute()
-                closed += 1
-                # Phase 2: release capital on close (D3: skip NULL-quantity trades)
-                if not DRY_RUN:
-                    if qty is not None:
-                        release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
-                    else:
-                        print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
-                # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
-                update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
-                print(f"  {ticker}: T3_HIT @ {exit_price} | PnL: {pnl}% | "
-                      f"CLOSED  (day {holding_days})")
+                pnl = _close_trade(trade, "TARGET_HIT", exit_price,
+                                   holding_days, now_ist)
+                if pnl is not None:
+                    closed += 1
+                    print(f"  {ticker}: T3_HIT @ {exit_price} | PnL: {pnl}% | "
+                          f"CLOSED  (day {holding_days})")
 
         elif new_status == "SL_HIT":
             exit_price = gap_exit_price or active_sl
-            pnl = calc_pnl_pct(direction, entry, exit_price)
-            qty = trade.get("quantity")
-            pnl_rs = compute_pnl_rs(pnl, entry, qty)
             label = "GAP-EXIT" if gap_exit_price else "SL_HIT"
-            update_data = {
-                "status": "SL_HIT",
-                "closed_at": now_ist.isoformat(),
-                "exit_price": exit_price,
-                "pnl_pct": pnl,
-                "pnl_rs": pnl_rs,
-                "trailing_sl": active_sl,
-            }
-            if DRY_RUN:
-                print(f"  [DRY-RUN] Would update: {update_data}")
-            else:
-                supabase.table("paper_trades").update(update_data)\
-                    .eq("id", trade["id"]).execute()
-            closed += 1
-            # Phase 2: release capital on close (D3: skip NULL-quantity trades)
-            if not DRY_RUN:
-                if qty is not None:
-                    release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
-                else:
-                    print(f"  {ticker}: pre-Phase-2 trade (no quantity), skipping ledger")
-            # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
-            update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
-            print(f"  {ticker}: {label} @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
+            pnl = _close_trade(trade, "SL_HIT", exit_price, holding_days,
+                               now_ist, extra_fields={"trailing_sl": active_sl})
+            if pnl is not None:
+                closed += 1
+                print(f"  {ticker}: {label} @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         elif new_status == "EXPIRED":
             exit_price = market["ltp"]
             pnl = _close_expired(trade, exit_price, holding_days, now_ist)
-            closed += 1
-            print(f"  {ticker}: EXPIRED @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
+            if pnl is not None:
+                closed += 1
+                print(f"  {ticker}: EXPIRED @ {exit_price} | PnL: {pnl}%  (day {holding_days})")
 
         else:
             days_left = max(0, max_hold - holding_days)
