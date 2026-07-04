@@ -20,22 +20,31 @@ from utils.neon_client import get_neon_connection
 WINDOW_MINUTES = 45  # P2-3: widened from 20 (late filings were being dropped)
 
 
-def lookup_sector(symbol: str) -> str | None:
-    """Look up a stock's sector from Neon company_profiles (symbols stored with .NS suffix)."""
+def lookup_sector(symbol: str, conn) -> str | None:
+    """Look up a stock's sector from Neon company_profiles (symbols stored with .NS suffix).
+
+    Uses the caller's shared connection (one per sync run, not per filing).
+    Returns None on any failure; rolls back so an aborted transaction does
+    not poison later lookups on the same connection.
+    """
+    if conn is None:
+        return None
     try:
-        conn = get_neon_connection()
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT sector FROM company_profiles WHERE symbol = %s LIMIT 1",
                 (f"{symbol}.NS",)
             )
             row = cur.fetchone()
-        conn.close()
         if row and row[0]:
             return row[0]
         return None
     except Exception as e:
         print(f"  [WARN] sector lookup failed for {symbol}: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return None
 
 
@@ -58,49 +67,62 @@ def sync_to_filing_memory():
     inserted = 0
     skipped_dup = 0
 
-    for filing in rows.data:
-        url_hash_val = filing.get("url_hash")
-        if not url_hash_val:
-            print(f"  [WARN] {filing.get('symbol','?')}: NULL url_hash — skipping")
-            continue
+    neon_conn = None
+    try:
+        neon_conn = get_neon_connection()
+    except Exception as e:
+        print(f"  [WARN] Neon connection failed: {e} — sector will be NULL this run")
 
-        classified_at = filing.get("classified_at")
-        filing_date = None
-        filing_timestamp = None
-        if classified_at:
-            try:
-                dt = datetime.fromisoformat(classified_at.replace("Z", "+00:00"))
-                filing_date = dt.date().isoformat()
-                filing_timestamp = dt.isoformat()
-            except (ValueError, AttributeError):
-                pass
-
-        sector_val = lookup_sector(filing.get("symbol", ""))
-
-        insert_data = {
-            "url_hash": url_hash_val,
-            "symbol_base": filing.get("symbol", ""),
-            "company_name": filing.get("company_name"),
-            "sector": sector_val,
-            "event_type": filing.get("event_type", "OTHER"),
-            "material_score": filing.get("material_score", 0),
-            "filing_date": filing_date,
-            "filing_timestamp": filing_timestamp,
-            "raw_title": filing.get("raw_title"),
-            "ai_summary": filing.get("summary"),
-        }
-
-        try:
-            sb.table("filing_memory").insert(insert_data).execute()
-            inserted += 1
-            print(f"  + {filing.get('symbol','?')}: {filing.get('event_type','?')} "
-                  f"score={filing.get('material_score','?')} sector={sector_val}")
-        except Exception as e:
-            err_str = str(e)
-            if "23505" in err_str:
-                skipped_dup += 1
+    try:
+        for filing in rows.data:
+            url_hash_val = filing.get("url_hash")
+            if not url_hash_val:
+                print(f"  [WARN] {filing.get('symbol','?')}: NULL url_hash — skipping")
                 continue
-            print(f"  [WARN] insert failed for {filing.get('symbol','?')}: {e}")
+
+            classified_at = filing.get("classified_at")
+            filing_date = None
+            filing_timestamp = None
+            if classified_at:
+                try:
+                    dt = datetime.fromisoformat(classified_at.replace("Z", "+00:00"))
+                    filing_date = dt.date().isoformat()
+                    filing_timestamp = dt.isoformat()
+                except (ValueError, AttributeError):
+                    pass
+
+            sector_val = lookup_sector(filing.get("symbol", ""), neon_conn)
+
+            insert_data = {
+                "url_hash": url_hash_val,
+                "symbol_base": filing.get("symbol", ""),
+                "company_name": filing.get("company_name"),
+                "sector": sector_val,
+                "event_type": filing.get("event_type", "OTHER"),
+                "material_score": filing.get("material_score", 0),
+                "filing_date": filing_date,
+                "filing_timestamp": filing_timestamp,
+                "raw_title": filing.get("raw_title"),
+                "ai_summary": filing.get("summary"),
+            }
+
+            try:
+                sb.table("filing_memory").insert(insert_data).execute()
+                inserted += 1
+                print(f"  + {filing.get('symbol','?')}: {filing.get('event_type','?')} "
+                      f"score={filing.get('material_score','?')} sector={sector_val}")
+            except Exception as e:
+                err_str = str(e)
+                if "23505" in err_str:
+                    skipped_dup += 1
+                    continue
+                print(f"  [WARN] insert failed for {filing.get('symbol','?')}: {e}")
+    finally:
+        if neon_conn is not None:
+            try:
+                neon_conn.close()
+            except Exception:
+                pass
 
     print(f"  Done: {inserted} inserted, {skipped_dup} duplicates skipped")
     return inserted

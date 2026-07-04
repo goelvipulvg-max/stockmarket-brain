@@ -36,6 +36,7 @@ MOOD_MULTIPLIERS = {
 
 def _get_historical_gap(event_type: str) -> tuple:
     """Returns (avg_gap_pct, sample_size) from pattern_library in Neon."""
+    conn = None
     try:
         conn = get_neon_connection()
         with conn.cursor() as cur:
@@ -49,7 +50,6 @@ def _get_historical_gap(event_type: str) -> tuple:
                 LIMIT 1
             """, (f"%_{event_type.lower()}",))
             row = cur.fetchone()
-        conn.close()
         if row and row[1] and row[1] > 0:
             gap = float(row[0]) if row[0] else None
             samples = int(row[1])
@@ -57,6 +57,12 @@ def _get_historical_gap(event_type: str) -> tuple:
         return None, 0
     except Exception:
         return None, 0
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _determine_confidence(sample_size: int) -> str:

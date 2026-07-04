@@ -168,7 +168,8 @@ def fetch_recent_news(symbol: str, hours: int) -> list[dict]:
         rows = (
             supabase.table("news_log")
             .select("id,source,title,summary,score,category,fetched_at")
-            .order("fetched_at", desc=True).limit(50).execute().data
+            .gte("fetched_at", cutoff.isoformat())
+            .order("fetched_at", desc=True).limit(200).execute().data
         )
     except Exception:
         return []
