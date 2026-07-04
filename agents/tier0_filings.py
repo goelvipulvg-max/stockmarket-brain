@@ -248,7 +248,7 @@ def main():
             # Loop 7 — Gap Calculator (after all gates pass)
             gap_data = None
             try:
-                gap_data = calculate_expected_gap(event_type, pdf_data, market_mood)
+                gap_data = calculate_expected_gap(event_type, market_mood)
                 print(f"     Gap: {gap_data['expected_gap_pct']:+.2f}% | Confidence: {gap_data['confidence']}")
             except Exception as e:
                 print(f"     ⚠️ Gap calc failed: {e} — continuing without trade setup")

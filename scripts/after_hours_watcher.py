@@ -272,7 +272,7 @@ def main():
             pdf_summary = get_pdf_context_summary(pdf_data)
             print(f"     PDF: {pdf_summary[:100]}...")
 
-            gap_result = calculate_expected_gap(event_type, pdf_data, market_mood)
+            gap_result = calculate_expected_gap(event_type, market_mood)
 
             if abs(gap_result["expected_gap_pct"]) < 1.0:
                 print(f"     SKIP: {filing['symbol']} — Gap {gap_result['expected_gap_pct']}% too small")

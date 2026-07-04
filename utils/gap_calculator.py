@@ -34,35 +34,12 @@ MOOD_MULTIPLIERS = {
 }
 
 
-def _get_historical_gap(event_type: str, symbol: str = None) -> tuple:
+def _get_historical_gap(event_type: str) -> tuple:
     """Returns (avg_gap_pct, sample_size) from pattern_library in Neon."""
     try:
         conn = get_neon_connection()
         with conn.cursor() as cur:
-            # Exact match: symbol -> sector -> pattern_name = sector_eventtype
-            if symbol:
-                cur.execute(
-                    "SELECT sector FROM company_profiles WHERE symbol = %s LIMIT 1",
-                    (f"{symbol}.NS",)
-                )
-                sector_row = cur.fetchone()
-                if sector_row and sector_row[0]:
-                    sector = sector_row[0]
-                    pattern_name = f"{sector}_{event_type.lower()}"
-                    cur.execute("""
-                        SELECT (pattern_data->>'avg_impact_pct')::numeric AS avg_gap,
-                               sample_size
-                        FROM pattern_library
-                        WHERE pattern_name = %s
-                    """, (pattern_name,))
-                    row = cur.fetchone()
-                    if row and row[1] and row[1] > 0:
-                        gap = float(row[0]) if row[0] else None
-                        samples = int(row[1])
-                        conn.close()
-                        return gap, samples
-
-            # Fallback: LIKE suffix match across all sectors
+            # LIKE suffix match across all sectors
             cur.execute("""
                 SELECT (pattern_data->>'avg_impact_pct')::numeric AS avg_gap,
                        sample_size
@@ -102,7 +79,7 @@ def _calculate_levels(gap_pct: float) -> dict:
     }
 
 
-def calculate_expected_gap(event_type: str, pdf_data: dict, market_mood: str) -> dict:
+def calculate_expected_gap(event_type: str, market_mood: str) -> dict:
     """
     Returns:
         expected_gap_pct  — float (% change expected at next open)
@@ -137,6 +114,6 @@ def calculate_expected_gap(event_type: str, pdf_data: dict, market_mood: str) ->
 
 
 if __name__ == "__main__":
-    result = calculate_expected_gap("RESULTS", {}, "NEUTRAL")
+    result = calculate_expected_gap("RESULTS", "NEUTRAL")
     for k, v in result.items():
         print(f"  {k}: {v}")
