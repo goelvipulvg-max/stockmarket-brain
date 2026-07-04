@@ -21,15 +21,16 @@ def test_compute_stats_by_confidence():
         make_trade(confidence=8, status="TARGET_HIT"),
         make_trade(confidence=8, status="SL_HIT"),
         make_trade(confidence=8, status="SL_HIT"),
+        make_trade(confidence=8, status="EXPIRED"),
         make_trade(confidence=9, status="TARGET_HIT"),
         make_trade(confidence=9, status="TARGET_HIT"),
         make_trade(confidence=9, status="SL_HIT"),
         make_trade(confidence=10, status="TARGET_HIT"),
     ]
     stats = compute_stats(trades)
-    assert stats["by_confidence"][8] == {"wins": 1, "total": 3}
-    assert stats["by_confidence"][9] == {"wins": 2, "total": 3}
-    assert stats["by_confidence"][10] == {"wins": 1, "total": 1}
+    assert stats["by_confidence"][8] == {"wins": 1, "losses": 2, "expired": 1, "total": 4}
+    assert stats["by_confidence"][9] == {"wins": 2, "losses": 1, "expired": 0, "total": 3}
+    assert stats["by_confidence"][10] == {"wins": 1, "losses": 0, "expired": 0, "total": 1}
 
 
 def test_compute_stats_by_ticker_min2():
@@ -44,8 +45,8 @@ def test_compute_stats_by_ticker_min2():
     assert "RELIANCE.NS" in stats["by_ticker"]
     assert "INFY.NS" in stats["by_ticker"]
     assert "TCS.NS" not in stats["by_ticker"]
-    assert stats["by_ticker"]["RELIANCE.NS"] == {"wins": 1, "total": 2}
-    assert stats["by_ticker"]["INFY.NS"] == {"wins": 0, "total": 2}
+    assert stats["by_ticker"]["RELIANCE.NS"] == {"wins": 1, "losses": 1, "expired": 0, "total": 2}
+    assert stats["by_ticker"]["INFY.NS"] == {"wins": 0, "losses": 2, "expired": 0, "total": 2}
 
 
 def test_compute_stats_by_direction():
@@ -57,8 +58,8 @@ def test_compute_stats_by_direction():
         make_trade(direction="SELL", status="TARGET_HIT"),
     ]
     stats = compute_stats(trades)
-    assert stats["by_direction"]["BUY"] == {"wins": 2, "total": 3}
-    assert stats["by_direction"]["SELL"] == {"wins": 1, "total": 2}
+    assert stats["by_direction"]["BUY"] == {"wins": 2, "losses": 1, "expired": 0, "total": 3}
+    assert stats["by_direction"]["SELL"] == {"wins": 1, "losses": 1, "expired": 0, "total": 2}
 
 
 # ── format_memory_text ────────────────────────────────────────────────────────
@@ -66,25 +67,21 @@ def test_compute_stats_by_direction():
 def test_format_memory_text():
     stats = {
         "by_confidence": {
-            9: {"wins": 7, "total": 11},
+            9: {"wins": 7, "losses": 3, "expired": 1, "total": 11},
         },
         "by_ticker": {
-            "RELIANCE.NS": {"wins": 3, "total": 4},
+            "RELIANCE.NS": {"wins": 3, "losses": 1, "expired": 0, "total": 4},
         },
         "by_direction": {
-            "BUY": {"wins": 9, "total": 16},
+            "BUY": {"wins": 9, "losses": 5, "expired": 2, "total": 16},
         },
         "total_resolved": 11,
     }
     text = format_memory_text(stats, "2026-05-07")
     assert "2026-05-07" in text
-    assert "Conf 9" in text
-    assert "7W/11T" in text
-    assert "64%" in text
-    assert "RELIANCE.NS" in text
-    assert "3W/4T" in text
-    assert "BUY" in text
-    assert "9W/16T" in text
+    assert "Conf 9: 7W/3L/1E (11T) = 70%" in text
+    assert "RELIANCE.NS: 3W/1L/0E (4T) = 75%" in text
+    assert "BUY: 9W/5L/2E (16T) = 64%" in text
 
 
 def test_zero_resolved_trades():
@@ -98,9 +95,9 @@ def test_zero_resolved_trades():
 
 def test_format_confidence_insufficient_data():
     stats = {
-        "by_confidence": {8: {"wins": 1, "total": 2}},
+        "by_confidence": {8: {"wins": 1, "losses": 1, "expired": 0, "total": 2}},
         "by_ticker": {},
-        "by_direction": {"BUY": {"wins": 5, "total": 8}},
+        "by_direction": {"BUY": {"wins": 5, "losses": 3, "expired": 0, "total": 8}},
         "total_resolved": 2,
     }
     text = format_memory_text(stats, "2026-05-07")
@@ -110,9 +107,9 @@ def test_format_confidence_insufficient_data():
 
 def test_format_direction_insufficient_data():
     stats = {
-        "by_confidence": {9: {"wins": 4, "total": 5}},
+        "by_confidence": {9: {"wins": 4, "losses": 1, "expired": 0, "total": 5}},
         "by_ticker": {},
-        "by_direction": {"SELL": {"wins": 1, "total": 1}},
+        "by_direction": {"SELL": {"wins": 1, "losses": 0, "expired": 0, "total": 1}},
         "total_resolved": 6,
     }
     text = format_memory_text(stats, "2026-05-07")
@@ -124,16 +121,27 @@ def test_format_direction_insufficient_data():
 def test_format_mixed_confidence():
     stats = {
         "by_confidence": {
-            8: {"wins": 1, "total": 2},   # below threshold
-            9: {"wins": 7, "total": 11},  # above threshold
+            8: {"wins": 1, "losses": 1, "expired": 0, "total": 2},   # below threshold
+            9: {"wins": 7, "losses": 4, "expired": 0, "total": 11},  # above threshold
         },
         "by_ticker": {},
-        "by_direction": {"BUY": {"wins": 8, "total": 13}},
+        "by_direction": {"BUY": {"wins": 8, "losses": 5, "expired": 0, "total": 13}},
         "total_resolved": 13,
     }
     text = format_memory_text(stats, "2026-05-07")
     assert "Conf 8: 2T — insufficient data" in text
-    assert "Conf 9: 7W/11T = 64%" in text
+    assert "Conf 9: 7W/4L/0E (11T) = 64%" in text
+
+
+def test_format_all_expired_no_decisive():
+    stats = {
+        "by_confidence": {9: {"wins": 0, "losses": 0, "expired": 3, "total": 3}},
+        "by_ticker": {},
+        "by_direction": {},
+        "total_resolved": 3,
+    }
+    text = format_memory_text(stats, "2026-05-07")
+    assert "Conf 9: 0W/0L/3E (3T) — no decisive closes" in text
 
 
 # ── Tier-3 integration ────────────────────────────────────────────────────────

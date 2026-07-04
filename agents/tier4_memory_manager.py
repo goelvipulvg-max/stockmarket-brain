@@ -14,26 +14,30 @@ MIN_SAMPLES = 3
 
 
 def compute_stats(trades: list) -> dict:
-    by_confidence = defaultdict(lambda: {"wins": 0, "total": 0})
-    by_ticker_all = defaultdict(lambda: {"wins": 0, "total": 0})
-    by_direction = defaultdict(lambda: {"wins": 0, "total": 0})
+    by_confidence = defaultdict(lambda: {"wins": 0, "losses": 0, "expired": 0, "total": 0})
+    by_ticker_all = defaultdict(lambda: {"wins": 0, "losses": 0, "expired": 0, "total": 0})
+    by_direction = defaultdict(lambda: {"wins": 0, "losses": 0, "expired": 0, "total": 0})
 
     for t in trades:
-        is_win = t["status"] == "TARGET_HIT"
+        status = t["status"]
+        if status == "TARGET_HIT":
+            bucket = "wins"
+        elif status == "EXPIRED":
+            bucket = "expired"
+        else:
+            bucket = "losses"
+
         conf = t["confidence_tier2"]
         by_confidence[conf]["total"] += 1
-        if is_win:
-            by_confidence[conf]["wins"] += 1
+        by_confidence[conf][bucket] += 1
 
         ticker = t["ticker"]
         by_ticker_all[ticker]["total"] += 1
-        if is_win:
-            by_ticker_all[ticker]["wins"] += 1
+        by_ticker_all[ticker][bucket] += 1
 
         direction = t["direction"]
         by_direction[direction]["total"] += 1
-        if is_win:
-            by_direction[direction]["wins"] += 1
+        by_direction[direction][bucket] += 1
 
     by_ticker = {k: v for k, v in by_ticker_all.items() if v["total"] >= 2}
 
@@ -45,18 +49,29 @@ def compute_stats(trades: list) -> dict:
     }
 
 
+def _format_bucket(s: dict) -> str:
+    """Render 'xW/yL/zE (nT) = p%' with win% over decisive (W+L) closes only."""
+    decisive = s["wins"] + s["losses"]
+    counts = f"{s['wins']}W/{s['losses']}L/{s['expired']}E ({s['total']}T)"
+    if decisive == 0:
+        return f"{counts} — no decisive closes"
+    pct = round(s["wins"] / decisive * 100)
+    return f"{counts} = {pct}%"
+
+
 def format_memory_text(stats: dict, date_str: str) -> str:
     if stats["total_resolved"] == 0:
         return "No resolved trades yet."
 
     lines = [f"=== Historical Performance (as of {date_str}) ===", ""]
+    lines.append("(W=target hit, L=SL hit, E=expired; win% over W+L only)")
+    lines.append("")
 
     lines.append("By confidence:")
     for conf in sorted(stats["by_confidence"]):
         s = stats["by_confidence"][conf]
         if s["total"] >= MIN_SAMPLES:
-            pct = round(s["wins"] / s["total"] * 100)
-            lines.append(f"  Conf {conf}: {s['wins']}W/{s['total']}T = {pct}%")
+            lines.append(f"  Conf {conf}: {_format_bucket(s)}")
         else:
             lines.append(f"  Conf {conf}: {s['total']}T — insufficient data")
 
@@ -65,8 +80,7 @@ def format_memory_text(stats: dict, date_str: str) -> str:
         lines.append("By ticker (min 2 trades):")
         for ticker in sorted(stats["by_ticker"]):
             s = stats["by_ticker"][ticker]
-            pct = round(s["wins"] / s["total"] * 100)
-            lines.append(f"  {ticker}: {s['wins']}W/{s['total']}T = {pct}%")
+            lines.append(f"  {ticker}: {_format_bucket(s)}")
 
     if stats["by_direction"]:
         lines.append("")
@@ -74,8 +88,7 @@ def format_memory_text(stats: dict, date_str: str) -> str:
         for direction in sorted(stats["by_direction"]):
             s = stats["by_direction"][direction]
             if s["total"] >= MIN_SAMPLES:
-                pct = round(s["wins"] / s["total"] * 100)
-                lines.append(f"  {direction}: {s['wins']}W/{s['total']}T = {pct}%")
+                lines.append(f"  {direction}: {_format_bucket(s)}")
             else:
                 lines.append(f"  {direction}: {s['total']}T — insufficient data")
 
@@ -142,7 +155,7 @@ def main():
         supabase.table("tier3_decisions")
         .select("confidence_tier2,ticker,direction,paper_trades(status)")
         .eq("approved", True)
-        .in_("paper_trades.status", ["TARGET_HIT", "SL_HIT"])
+        .in_("paper_trades.status", ["TARGET_HIT", "SL_HIT", "EXPIRED"])
         .execute()
         .data
     )
@@ -155,7 +168,7 @@ def main():
             "status": r["paper_trades"]["status"],
         }
         for r in rows
-        if r.get("paper_trades") and r["paper_trades"].get("status") in ("TARGET_HIT", "SL_HIT")
+        if r.get("paper_trades") and r["paper_trades"].get("status") in ("TARGET_HIT", "SL_HIT", "EXPIRED")
     ]
 
     print(f"Resolved approved trades found: {len(trades)}")
