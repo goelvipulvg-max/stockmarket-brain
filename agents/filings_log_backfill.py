@@ -77,7 +77,9 @@ def backfill_filings_log():
             "filing_timestamp": filing_timestamp,
             "raw_title": filing.get("raw_title"),
             "ai_summary": filing.get("summary"),
-            "pdf_extract": None,
+            # pdf_extract intentionally omitted: column reserved for the future
+            # PDF pipeline; including it here would clobber populated values on
+            # upsert re-runs.
         })
 
     if not insert_rows:
