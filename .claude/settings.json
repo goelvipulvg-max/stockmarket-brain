@@ -39,7 +39,19 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/ -v)",
       "Bash(.venv/Scripts/python.exe -c \"import agents.tier0_filings; print\\('tier0 import OK'\\)\")",
       "Bash(.venv/Scripts/python.exe -m pytest tests/ -v --tb=short)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=. .venv/Scripts/python.exe agents/tier0_filings.py)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=. .venv/Scripts/python.exe agents/tier0_filings.py)",
+      "PowerShell(gh run list --workflow=tier0f-poller.yml --limit 20 --json databaseId,status,conclusion,createdAt,event,headBranch 2>&1)",
+      "PowerShell(gh secret list 2>&1)",
+      "PowerShell(gh run list --limit 100 --created \\(Get-Date\\).AddDays\\(-7\\).ToString\\('yyyy-MM-dd'\\) 2>&1)",
+      "PowerShell(gh run list --limit 30 --created 2026-05-19 2>&1)",
+      "PowerShell(gh run list --workflow=\"Tier-0 Filing Agent\" --limit 10 --created 2026-05-19 2>&1)",
+      "PowerShell(gh run view 26103913981 --log 2>&1)",
+      "PowerShell(gh run view 26102520045 --log 2>&1)",
+      "PowerShell($env:PYTHONPATH=\"C:\\\\dev\\\\stockmarket-brain\"; .venv\\\\Scripts\\\\python.exe scripts/_recon_orphan.py)",
+      "PowerShell(gh run list --workflow=tier2f.yml --limit 5 --created 2026-05-22 2>&1)",
+      "PowerShell(gh run view 26269844683 --log 2>&1)",
+      "PowerShell(gh api repos/goelvipulvg-max/stockmarket-brain/contents/.github/workflows/tier2f.yml --jq '.content' 2>&1 | ForEach-Object { [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($_\\)\\) } | Select-String -Pattern \"SUPABASE|NEON\")",
+      "PowerShell(gh run list --workflow=tier2f.yml --limit 10 2>&1)"
     ]
   }
 }
