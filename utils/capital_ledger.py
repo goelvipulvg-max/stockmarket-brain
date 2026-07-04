@@ -2,7 +2,6 @@
 Virtual Capital Ledger — Phase 2, v3.1 Master Plan §5.3.
 Tracks simulated Rs.10,00,000 portfolio in Supabase.
 """
-from datetime import datetime
 from utils.supabase_client import get_client
 
 sb = get_client()
@@ -29,80 +28,36 @@ def _initialize_portfolio():
     return result.data[0] if result.data else initial
 
 
-def _update_portfolio(**kwargs):
-    """UPDATE the single current portfolio row (latest by id).
-
-    Keyword arguments:
-        cash         — sets cash_available
-        deployed     — sets capital_deployed
-        open_count   — sets open_positions
-        realized_add — INCREMENTS realized_pnl_rs (not sets)
-
-    total_equity = cash_available + capital_deployed (at cost, no MTM — D4).
-    """
-    pf = get_current_portfolio()
-
-    new_cash = kwargs.get("cash", pf["cash_available"])
-    new_deployed = kwargs.get("deployed", pf["capital_deployed"])
-    new_open = kwargs.get("open_count", pf["open_positions"])
-    realized_add = kwargs.get("realized_add", 0)
-
-    new_realized = float(pf.get("realized_pnl_rs") or 0) + realized_add
-    new_equity = float(new_cash) + float(new_deployed)  # D4: no MTM
-
-    sb.table("portfolio").update({
-        "cash_available": new_cash,
-        "capital_deployed": new_deployed,
-        "total_equity": new_equity,
-        "realized_pnl_rs": new_realized,
-        "open_positions": new_open,
-        "updated_at": datetime.now().isoformat(),
-    }).eq("id", pf["id"]).execute()
-
-
 def deploy_capital(paper_trade_id, amount_rs):
-    """Deduct cash, write a DEPLOY ledger row. Called when a trade opens."""
-    pf = get_current_portfolio()
-    if amount_rs > float(pf["cash_available"]):
-        raise ValueError(
-            f"Insufficient cash: need Rs.{amount_rs:,.2f}, "
-            f"have Rs.{float(pf['cash_available']):,.2f}"
-        )
+    """Deduct cash, write a DEPLOY ledger row. Called when a trade opens.
 
-    new_cash = float(pf["cash_available"]) - amount_rs
-
-    sb.table("capital_ledger").insert({
-        "paper_trade_id": paper_trade_id,
-        "txn_type": "DEPLOY",
-        "amount_rs": -amount_rs,
-        "cash_after": new_cash,
-        "note": f"Opened trade {paper_trade_id}",
+    P0-1: single atomic RPC — ledger insert + portfolio update happen in one
+    row-locked Postgres transaction, so a concurrent release_capital can no
+    longer produce a lost update. Raises ValueError on insufficient cash
+    (same contract as the old Python-side guard).
+    """
+    result = sb.rpc("deploy_capital_atomic", {
+        "p_paper_trade_id": paper_trade_id,
+        "p_amount_rs": round(float(amount_rs), 2),
     }).execute()
-
-    _update_portfolio(
-        cash=new_cash,
-        deployed=float(pf["capital_deployed"]) + amount_rs,
-        open_count=pf["open_positions"] + 1,
-    )
+    data = result.data
+    if not data or not data.get("success"):
+        raise ValueError((data or {}).get("error") or "deploy_capital_atomic failed")
+    return data
 
 
 def release_capital(paper_trade_id, position_size_rs, pnl_rs):
-    """Return deployed capital + realised P&L to cash. Called on trade close."""
-    pf = get_current_portfolio()
-    returned = position_size_rs + pnl_rs
-    new_cash = float(pf["cash_available"]) + returned
+    """Return deployed capital + realised P&L to cash. Called on trade close.
 
-    sb.table("capital_ledger").insert({
-        "paper_trade_id": paper_trade_id,
-        "txn_type": "PNL_REALIZED",
-        "amount_rs": returned,
-        "cash_after": new_cash,
-        "note": f"Closed trade {paper_trade_id}, P&L Rs.{pnl_rs:,.2f}",
+    P0-1: single atomic RPC (see deploy_capital). Raises RuntimeError only if
+    the portfolio row is missing — the old code had no guards here.
+    """
+    result = sb.rpc("release_capital_atomic", {
+        "p_paper_trade_id": paper_trade_id,
+        "p_position_size_rs": round(float(position_size_rs), 2),
+        "p_pnl_rs": round(float(pnl_rs), 2),
     }).execute()
-
-    _update_portfolio(
-        cash=new_cash,
-        deployed=float(pf["capital_deployed"]) - position_size_rs,
-        open_count=pf["open_positions"] - 1,
-        realized_add=pnl_rs,
-    )
+    data = result.data
+    if not data or not data.get("success"):
+        raise RuntimeError((data or {}).get("error") or "release_capital_atomic failed")
+    return data
