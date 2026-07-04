@@ -1,4 +1,9 @@
 ﻿name: Update Paper Trades
+
+concurrency:
+  group: updater-run
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
 jobs:
