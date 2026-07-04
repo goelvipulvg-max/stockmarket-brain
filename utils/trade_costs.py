@@ -1,9 +1,9 @@
 """Indian equity DELIVERY round-trip transaction-cost model (pure, no I/O).
 
 Models the real round-trip cost of a CNC/delivery equity trade on NSE so that
-expectancy (utils.expectancy, reliability-gap #7) can later be reported
-net-of-cost instead of on gross pnl_pct. NOT yet wired into expectancy -- this
-is the cost primitive only; the wiring is a separate step.
+expectancy (utils.expectancy, reliability-gap #7) is reported net-of-cost
+instead of on gross pnl_pct. Wired into utils/expectancy.py, which imports
+compute_trade_costs and applies it per closed trade.
 
 Two APIs:
   - compute_trade_costs(entry, exit, qty)  -> exact per-trade Rs cost (uses the

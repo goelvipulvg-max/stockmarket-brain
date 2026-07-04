@@ -331,7 +331,7 @@ def main():
 
     print(f"\n{'='*50}")
     print(f"  Done! {material_count} material filings → Telegram")
-    print(f"  Processed: {min(10,len(filings))} filings")
+    print(f"  Processed: {min(20,len(filings))} filings")
     print(f"{'='*50}\n")
 
 if __name__ == "__main__":
