@@ -410,29 +410,38 @@ but remain in the updater's main loop:
 
 | Path | Location | Risk |
 |------|----------|------|
-| Hit-detection triggers | `update_paper_trades.py:201-232` (T1-hit, T2-hit, T3-hit detection comparing `day_high/day_low`) | Untested. Logic is straightforward (price > target → hit) but no automated verification |
-| Day-0 LTP-only guard | `update_paper_trades.py:83` fetches `range=1d` — on signal day, the full day's OHLC is available retroactively (P0-2 look-ahead) | Known bug, not fixed. First-run after signal may use future intraday knowledge |
-| Idempotency guards | `t1_hit` / `t2_hit` boolean columns prevent duplicate upgrades (`:252-254`) | Works by design (simple bool check), but no test confirms a double-upgrade can't happen |
+| Hit-detection triggers | `update_paper_trades.py:331-410` (target/SL hit detection on `hi/lo`; T1→T2→T3 level upgrades at `:379-403`) | Untested. Logic is straightforward (price > target → hit) but no automated verification |
+| Day-0 LTP-only guard | `update_paper_trades.py:310-329` — HOTFIX-2 (P0-2, commit 507f6f0) detects day-0 from `signal_generated_at` (IST; fallback `signal_date`) and uses LTP-only hit checks on the entry day | FIXED — no longer a look-ahead. Still untested: a regression would silently reintroduce P0-2 |
+| Idempotency guards | `t1_hit` / `t2_hit` boolean columns prevent duplicate upgrades (read at `:275-276`, gates at `:379`/`:403`) | Works by design (simple bool check), but no test confirms a double-upgrade can't happen |
 
 **Watch for:** multiple Tier-2F signals hitting the same stock on the same day
-(spotted via `paper_trades` query). If the day-0 guard bug causes an optimistic
-target hit, it would close a trade on day 0 at T1 — visible in `status='TARGET_HIT'`
-with `holding_days=0`.
+(spotted via `paper_trades` query). A day-0 close at T1 (`status='TARGET_HIT'`
+with `holding_days=0`) would mean the HOTFIX-2 guard regressed — investigate
+before trusting subsequent closes.
 
-### 3.4 Duplicate-trade race (MITIGATED, not eliminated)
+### 3.4 Duplicate-trade race (FIXED by P2-14 mark-before-dispatch)
 
 The deployed `uniq_filings_log_url_hash` index prevents duplicate `filings_log`
 rows → prevents the Tier-0F Poller from dispatching Tier-2F twice for the same
-filing. **But:** the poller's `_dispatch_tier2f` → `_mark_picked` sequence
-(`agents/tier0f_poller.py:153`) dispatches BEFORE marking. If `_mark_picked` fails
-(network blip, DB timeout), the filing stays `picked_by_tier0f=false` and gets
-re-dispatched on the next poller cycle.
+filing. P2-14 (commit 46c5c1b) additionally flipped the poller to mark BEFORE
+dispatch: `_mark_picked` (`agents/tier0f_poller.py:173`) runs first,
+`_dispatch_tier2f` (`:178`) second, with a compensating rollback
+(`_unmark_picked`, `:131`, invoked `:185`) that resets `picked_by_tier0f=false`
+if dispatch definitively fails. The old race (dispatch succeeded, mark failed →
+re-dispatch next cycle → duplicate trade) is gone; a mark failure now skips
+dispatch entirely and retries cleanly.
+
+**Residual failure mode (inverted):** if dispatch fails AND the rollback also
+fails, the row stays `picked_by_tier0f=true` with nothing dispatched — a MISSED
+filing, not a duplicate. It is invisible to the health_monitor
+`picked_by_tier0f=false` backlog check; only the poller's exit code 1 and
+`Dispatch failed after mark` log line surface it.
 
 **Mitigation check:** The canary query in §2.5 (GROUP BY filing_id HAVING COUNT>1)
-will catch this. If it fires, the Tier-2F `concurrency: group: tier2f-capital`
-(YAML line 3–5) means the second dispatch queues behind the first — it won't
-parallel-race capital. And the poller's `BATCH_LIMIT=10` (`tier0f_poller.py:29`)
-caps exposure to 10 filings per cycle.
+still catches any duplicate dispatch. If one fires, the Tier-2F `concurrency:
+group: tier2f-capital` (YAML line 3–5) queues the second dispatch behind the
+first — it won't parallel-race capital. The poller's `BATCH_LIMIT=10`
+(`tier0f_poller.py:29`) caps exposure to 10 filings per cycle.
 
 ### 3.5 Capital-ledger race (P0-1, unmitigated)
 
