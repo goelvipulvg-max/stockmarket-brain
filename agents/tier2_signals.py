@@ -1,3 +1,15 @@
+"""DEPRECATED / ORPHANED — kept for reference only.
+
+No scheduler invokes this agent: .github/workflows/tier2_signals.yml was
+deleted in Phase-5B. Retained as design reference for the technical path
+(source='TIER2' in paper_trades).
+
+Known issue intentionally left unfixed (P1-8): the prompt requests
+confidence on a 1-10 integer scale and SCORE_THRESHOLD=7 gates on it,
+while downstream Tier-3 rejects confidence < 50 on a 0-100 scale
+(fail-closed). If this agent is ever re-enabled, rescale confidence to
+0-100 and raise SCORE_THRESHOLD to 70 first.
+"""
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
