@@ -63,6 +63,7 @@ def _query_pending_filings() -> list[dict]:
         .select('id, symbol, event_type, material_score, classified_at, trade_confidence')\
         .eq('is_material', True)\
         .gte('material_score', MIN_SCORE)\
+        .neq('event_type', 'OTHER')\
         .eq('picked_by_tier0f', False)\
         .gte('classified_at', cutoff)
     if USE_POLLER_CONFIDENCE_GATE:
