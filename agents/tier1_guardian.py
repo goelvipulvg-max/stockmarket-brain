@@ -22,6 +22,12 @@ DEDUP_HOURS           = 4
 EXIT_THRESHOLD        = -7
 HOLD_STRONG_THRESHOLD = 7
 MIN_SOURCES_REQUIRED  = 2
+# G-1: a lone catastrophic PRIMARY disclosure must not be silenced by the
+# corroboration rule (that rule exists for name-matched news noise). Filings
+# at/above this tier0 material_score (0-10 scale; ecosystem "material" floor
+# is 6) stand alone in two_source_gate -- DeepSeek scoring, the |score| >= 7
+# alert band and the 4h dedup still filter downstream.
+CATASTROPHIC_FILING_SCORE = 8
 DEEPSEEK_MODEL        = "deepseek-v4-flash"
 IST                   = ZoneInfo("Asia/Kolkata")
 
@@ -229,7 +235,17 @@ def apply_keyword_filters(items: list[dict]) -> list[dict]:
 # ── Two-Source Gate ────────────────────────────────────────────────────────────
 
 def two_source_gate(news: list[dict], filings: list[dict]) -> tuple:
-    """Return (passes_gate, distinct_source_count)."""
+    """Return (passes_gate, distinct_source_count).
+
+    The 2-source corroboration rule exists for name-matched news noise. An NSE
+    filing is a primary, company-confirmed disclosure: one scored catastrophic
+    by Tier-0 (material_score >= CATASTROPHIC_FILING_SCORE) passes on its own
+    (G-1) -- without this, a lone fraud/default filing with no same-4h news
+    (or ANY position missing from SYMBOL_NAME_MAP, where news matching is
+    skipped entirely) could never reach scoring: the wrong failure direction
+    for a protection layer. News-only signals still need MIN_SOURCES_REQUIRED
+    distinct outlets.
+    """
     sources = set()
     for n in (news or []):
         src = n.get("source", "")
@@ -237,6 +253,10 @@ def two_source_gate(news: list[dict], filings: list[dict]) -> tuple:
             sources.add(src)
     if filings:
         sources.add("NSE_FILING")
+    # G-1 bypass: None/missing material_score never bypasses (noise fail-safe).
+    if any((f.get("material_score") or 0) >= CATASTROPHIC_FILING_SCORE
+           for f in (filings or [])):
+        return True, len(sources)
     return len(sources) >= MIN_SOURCES_REQUIRED, len(sources)
 
 
