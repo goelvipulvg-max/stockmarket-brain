@@ -158,6 +158,9 @@ def _mock_pipeline(**overrides):
         "get_relevant_patterns": MagicMock(return_value=[]),
         "get_filing_memory_brief": MagicMock(return_value=""),
         "_tg_send": MagicMock(return_value=None),
+        "get_current_portfolio": MagicMock(return_value={
+            "total_equity": 1_000_000.0, "cash_available": 1_000_000.0,
+        }),
         # AI functions — overrides supply the test-specific behaviour.
         # Safe defaults below prevent live API calls if an override is missed.
         "run_analyst": MagicMock(return_value=_make_analyst()),

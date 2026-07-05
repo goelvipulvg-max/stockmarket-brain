@@ -1,6 +1,21 @@
+import os
 import sys
 import pytest
 from unittest.mock import patch
+
+# Phase-gate verification files hit LIVE services at import or in unmarked
+# tests -- test_phase2.py even runs deploy/release_capital against the live
+# portfolio at COLLECTION time. Excluded unless RUN_LIVE_TESTS=1.
+if os.getenv("RUN_LIVE_TESTS") != "1":
+    collect_ignore = [
+        "test_phase2.py",
+        "test_phase3_batchA.py",
+        "test_phase3_batchB.py",
+        "test_phase4_batchA.py",
+        "test_phase4_batchB.py",
+        "test_phase5_batchA.py",
+        "test_phase5_batchB.py",
+    ]
 
 
 def pytest_configure(config):

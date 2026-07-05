@@ -156,7 +156,7 @@ def test_V5_3_and_V5_4_live_insert(monkeypatch, fixture_filing):
         sb.table("portfolio").update(
             {
                 "cash_available": pf_before["cash_available"],
-                "deployed": pf_before["deployed"],
+                "capital_deployed": pf_before["capital_deployed"],
                 "open_positions": pf_before["open_positions"],
             }
         ).eq("id", pf_before["id"]).execute()
