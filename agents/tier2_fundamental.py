@@ -20,13 +20,13 @@ from utils.neon_fundamentals import get_fundamentals
 from utils.yfinance_chart import get_chart_snapshot
 from utils.price_structure import compute_price_structure, validate_price_structure
 from utils.volume_structure import compute_volume_structure, validate_volume_structure
-from utils.reward_risk import RR_FLOOR
+from utils.reward_risk import RR_FLOOR, enforce_live_rr_floor
 from utils.filing_memory_brief import get_filing_memory_brief
 from utils.pattern_insights_retriever import get_relevant_patterns
 from utils.ai_consensus import run_analyst, run_verifier, determine_consensus, _run_deepseek_as_analyst, _safe_conf
 from utils.position_sizer import calculate_position_size
 from utils.capital_ledger import get_current_portfolio, deploy_capital
-from utils.tiered_target_generator import generate_targets
+from utils.tiered_target_generator import generate_targets, T1_PCT, SL_PCT
 from utils.telegram_client import send_message
 from utils.supabase_client import get_client
 from utils.trade_memory_writer import build_live_trade_memory_row, insert_live_trade_memory
@@ -448,6 +448,24 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
         ai_sl_used = True
         print(f"[STAGE 9: ai_sl] OVERRIDE applied -> sl={sl:.2f} (ladder was {ladder_sl_price:.2f})")
 
+    # --- Live RR floor (audit T2F-1): validate_ai_signal checked RR against the AI
+    # shadow target, but the live trade exits its first leg at the ladder T1 --
+    # re-check the traded (T1_PCT, final SL) geometry; floor-breaking AI-SL
+    # reverts to the ladder SL, and a floor-breaking ladder skips the trade.
+    live_rr = enforce_live_rr_floor(
+        t1_pct=T1_PCT,
+        ai_sl_pct=ai_sl_validation["sl_pct"] if ai_sl_used else None,
+        ladder_sl_pct=SL_PCT,
+    )
+    if live_rr["use"] == "skip":
+        print(f"[STAGE 9: live_rr] ladder below floor (rr={live_rr['rr_ladder']}) -- SKIP")
+        return {"skip": "ladder_rr_below_floor", "live_rr_floor": live_rr}
+    if ai_sl_used and live_rr["use"] == "ladder":
+        sl = ladder_sl_price
+        ai_sl_used = False
+        print(f"[STAGE 9: live_rr] AI-SL breaks live floor (rr_ai={live_rr['rr_ai']} < "
+              f"{live_rr['rr_floor']} vs T1={T1_PCT}%) -- REVERT to ladder sl={sl:.2f}")
+
     print(f"[STAGE 9: sizing] entry={entry:.2f}, sl={sl:.2f}, t1={t1:.2f}, t2={t2:.2f}, t3={t3:.2f}, conviction={conviction}, avg_conf={avg_conf:.0f}")
 
     # --- Position sizing ---
@@ -515,6 +533,7 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
             "ladder_sl_price": round(ladder_sl_price, 2),
             "ai_sl_validation": ai_sl_validation,
             "ai_sl_used": ai_sl_used,
+            "live_rr_floor": live_rr,
             "blend_method": blend_method,
             "blended_inputs": blended_inputs,
             "t4_price": round(t4, 2) if t4 else None,
