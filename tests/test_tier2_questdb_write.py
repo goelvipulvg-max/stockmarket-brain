@@ -100,7 +100,15 @@ def test_questdb_failure_does_not_raise():
 
 
 def test_script_importable_when_run_directly():
-    """python agents/tier2_signals.py must not crash with ModuleNotFoundError (simulates CI)."""
+    """python agents/tier2_signals.py must import cleanly, then REFUSE to run.
+
+    Imports execute before the __main__ guard, so the ModuleNotFoundError
+    assertion still detects the sys.path bug. The guard itself is a hard-kill
+    (audit 2.5): before it, this subprocess ran the deprecated PRODUCTION
+    pipeline -- load_dotenv(override=True) inside the script restores real
+    .env creds over the scrubbed env below, so main() could insert real
+    paper_trades rows (and call DeepSeek) from a plain pytest run.
+    """
     project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
     result = subprocess.run(
         [sys.executable, "agents/tier2_signals.py"],
@@ -120,4 +128,11 @@ def test_script_importable_when_run_directly():
     assert "No module named 'utils'" not in result.stderr, (
         f"sys.path bug: script crashed with ModuleNotFoundError — fix not yet applied.\n"
         f"stderr:\n{result.stderr[:500]}"
+    )
+    assert result.returncode != 0, (
+        f"hard-kill regressed: deprecated entrypoint ran instead of refusing.\n"
+        f"stdout:\n{result.stdout[:500]}"
+    )
+    assert "DEPRECATED" in result.stderr, (
+        f"hard-kill message missing from stderr.\nstderr:\n{result.stderr[:500]}"
     )

@@ -237,11 +237,8 @@ def main():
     print(f"\nDone. Posted: {posted} signals")
 
 if __name__ == "__main__":
-    import sys
-    try:
-        main()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"\n❌ FATAL: Tier-2 Signal Agent crashed — {type(e).__name__}: {e}")
-        sys.exit(1)
+    sys.exit(
+        "DEPRECATED: tier2_signals is orphaned (P1-8 confidence-scale gap; "
+        "see module docstring). Refusing to run -- this main() would insert "
+        "production paper_trades rows with 1-10 confidence."
+    )

@@ -1,8 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv\\\\Scripts\\\\python.exe agents/tier2_signals.py)",
-      "Bash(.venv/Scripts/python.exe agents/tier2_signals.py)",
       "Bash(.venv/Scripts/python.exe scripts/backtest_analysis.py)",
       "Bash(.venv/Scripts/python.exe -c ' *)",
       "Bash(.venv/Scripts/python.exe agents/update_paper_trades.py)",
@@ -19,7 +17,6 @@
       "Bash(git commit -m ' *)",
       "Bash(.venv/Scripts/python.exe utils/questdb_client.py)",
       "Bash(.venv/Scripts/python.exe agents/tier1_news.py)",
-      "Bash(.venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0, '.'\\); exec\\(open\\('agents/tier2_signals.py'\\).read\\(\\)\\)\")",
       "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe agents/tier1_news.py)",
       "Bash(git push *)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_tier2_questdb_write.py -v -k \"not test_script_importable\")",
