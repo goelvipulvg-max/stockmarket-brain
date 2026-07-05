@@ -173,15 +173,18 @@ def _close_trade_with(release_fn):
         return [dict(TRADE)] if (q.op == "update" and "status" in (q.payload or {})) else []
 
     fake = _FakeSB(handler)
-    orig = (upt.DRY_RUN, upt.supabase, upt.release_capital, upt.update_trade_memory_outcome)
+    orig = (upt.DRY_RUN, upt.supabase, upt.release_capital,
+            upt.update_trade_memory_outcome, upt._tg_send)
     try:
         upt.DRY_RUN = False
         upt.supabase = fake
         upt.release_capital = release_fn
         upt.update_trade_memory_outcome = lambda *a, **k: 0
+        upt._tg_send = lambda *a, **k: None  # U-9 alerts (close + release-fail): no real send
         ret = upt._close_trade(dict(TRADE), "SL_HIT", 95.0, 5, NOW)
     finally:
-        upt.DRY_RUN, upt.supabase, upt.release_capital, upt.update_trade_memory_outcome = orig
+        (upt.DRY_RUN, upt.supabase, upt.release_capital,
+         upt.update_trade_memory_outcome, upt._tg_send) = orig
     return ret, fake
 
 

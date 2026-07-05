@@ -17,6 +17,7 @@ Logic:
 
 Backtest convention: zero slippage. Exit at exact target/SL on hit, LTP on expiry.
 """
+import os
 import sys
 from datetime import datetime, date, time as dt_time
 from zoneinfo import ZoneInfo
@@ -24,6 +25,7 @@ from utils.supabase_client import get_client
 from utils.capital_ledger import release_capital
 from utils.trade_memory_writer import update_trade_memory_outcome
 from utils.trade_costs import compute_trade_costs
+from utils.telegram_client import send_message
 from curl_cffi import requests as curl_requests
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -182,6 +184,25 @@ def _trade_cost_rs(entry, exit_price, qty):
     return round(tc["total_cost_rs"], 2) if tc["valid"] else None
 
 
+def _tg_send(message: str) -> None:
+    """Telegram alert to 'StockMarket-Brain Trades' channel (env: TELEGRAM_TIER3_CHANNEL).
+
+    Same channel as the Tier-2F open alerts, so a trade's open and close land in
+    one stream (U-9). Env is read at CALL time and DRY_RUN=False tests must stub
+    this attribute (load_dotenv at import puts real creds in os.environ). Fail-
+    open: an alert failure must never break a close -- mirrors tier2_fundamental.
+    """
+    try:
+        send_message(
+            bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
+            chat_id=os.getenv("TELEGRAM_TIER3_CHANNEL"),
+            text=message,
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        print(f"  [_tg_send] Telegram send failed: {e} -- continuing")
+
+
 def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
                  extra_fields=None):
     """Close an OPEN trade with an idempotent, atomic status transition (P2-7).
@@ -212,6 +233,8 @@ def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
         update_data.update(extra_fields)
     if DRY_RUN:
         print(f"  [DRY-RUN] Would update: {update_data}")
+        print(f"  [DRY-RUN] Would alert: CLOSED {trade['ticker']} {new_status} "
+              f"@ {exit_price} | PnL {pnl}%")
     else:
         result = supabase.table("paper_trades").update(update_data)\
             .eq("id", trade["id"]).eq("status", "OPEN").execute()
@@ -245,6 +268,13 @@ def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
                 _mark_release_failed(trade, rel_err)
         else:
             print(f"  {trade['ticker']}: pre-Phase-2 trade (no quantity), skipping ledger")
+        # U-9: close alert AFTER the flip + money move. Only the run that won the
+        # idempotent UPDATE reaches here (the loser returned above) => exactly
+        # one alert per closed trade even with overlapping runs.
+        emoji = {"TARGET_HIT": "🎯", "SL_HIT": "🛑", "EXPIRED": "⏳"}.get(new_status, "ℹ️")
+        rs_part = f" (Rs.{pnl_rs:,.2f})" if pnl_rs is not None else ""
+        _tg_send(f"{emoji} CLOSED {trade['ticker']} {direction} {new_status} "
+                 f"@ {exit_price} | PnL {pnl}%{rs_part} | day {holding_days}")
     # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
     update_trade_memory_outcome(supabase, trade["id"], new_status, pnl, holding_days, dry_run=DRY_RUN)
     return pnl
@@ -269,6 +299,8 @@ def _mark_release_failed(trade, err):
     the leak needs manual reconciliation via capital_ledger."""
     print(f"  {trade['ticker']}: CAPITAL RELEASE FAILED for closed trade "
           f"id={trade['id']}: {err} -- marking for retry")
+    _tg_send(f"🚨 UPDATER: capital release FAILED for closed {trade['ticker']} "
+             f"(id={trade['id']}) -- flagged for auto-retry.\nError: {err}")
     try:
         supabase.table("paper_trades").update({"capital_release_failed": True})\
             .eq("id", trade["id"]).execute()
@@ -277,6 +309,10 @@ def _mark_release_failed(trade, err):
               f"capital_release_failed on id={trade['id']}: {mark_err}. "
               f"Rs.{trade.get('position_size_rs')} stuck in capital_deployed; "
               f"manual reconciliation needed (release err: {err})")
+        _tg_send(f"🚨 UPDATER CRITICAL: release failed AND retry-flag write failed "
+                 f"for {trade['ticker']} (id={trade['id']}) -- "
+                 f"Rs.{trade.get('position_size_rs')} stuck in capital_deployed, "
+                 f"manual reconciliation needed.\nRelease err: {err}\nFlag err: {mark_err}")
 
 
 def _release_already_done(trade_id):
@@ -563,6 +599,10 @@ def main():
                 else:
                     supabase.table("paper_trades").update(update_data)\
                         .eq("id", trade["id"]).eq("status", "OPEN").execute()
+                    # U-9 add-on: compact upgrade alert -- the SL move is the
+                    # actionable part for the owner watching the channel.
+                    _tg_send(f"📈 {ticker} T1 hit @ {active_target} -> T2 mode | "
+                             f"SL raised to {update_data['trailing_sl']}")
                 upgraded += 1
                 print(f"  {ticker}: T1_HIT @ {active_target} → T2 "
                       f"(new SL={update_data['trailing_sl']}, T2={update_data['t2_price']})  (day {holding_days})")
@@ -587,6 +627,9 @@ def main():
                     else:
                         supabase.table("paper_trades").update(update_data)\
                             .eq("id", trade["id"]).eq("status", "OPEN").execute()
+                        # U-9 add-on: compact upgrade alert (see T1 site).
+                        _tg_send(f"📈 {ticker} T2 hit @ {active_target} -> T3 mode | "
+                                 f"SL raised to {update_data['trailing_sl']}")
                     upgraded += 1
                     print(f"  {ticker}: T2_HIT @ {active_target} → T3 "
                           f"(new SL={update_data['trailing_sl']})  (day {holding_days})")

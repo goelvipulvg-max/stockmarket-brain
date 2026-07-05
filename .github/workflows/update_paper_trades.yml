@@ -5,7 +5,15 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # PRIMARY trigger via cron-job.org webhook
+  schedule:
+    # FALLBACK redundancy (audit I-1) -- fires alongside cron-job.org; overlaps
+    # serialize via the updater-run concurrency group above, and the P2-7
+    # idempotent close is the second belt. Hour 10 UTC is REQUIRED: the expiry
+    # time-stop (should_force_expire) only fires at >= 15:30 IST MARKET_CLOSE,
+    # so a poller-style 3-9 UTC range would never close expiring trades when
+    # cron-job.org is down.
+    - cron: '*/10 3-10 * * 1-5'  # every 10 min Mon-Fri ~8:30 AM-4:20 PM IST
 jobs:
   update-trades:
     runs-on: ubuntu-latest
@@ -27,4 +35,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # U-9 close/upgrade alerts -- same channel as Tier-2F open alerts
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TIER3_CHANNEL: ${{ secrets.TELEGRAM_TIER3_CHANNEL }}
         run: python agents/update_paper_trades.py

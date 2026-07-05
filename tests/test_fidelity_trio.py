@@ -166,15 +166,18 @@ EXP_NET = round(50.0 - EXP_COST, 2)
 def _close_with(handler):
     released = []
     fake = _FakeSB(handler)
-    orig = (upt.DRY_RUN, upt.supabase, upt.release_capital, upt.update_trade_memory_outcome)
+    orig = (upt.DRY_RUN, upt.supabase, upt.release_capital,
+            upt.update_trade_memory_outcome, upt._tg_send)
     try:
         upt.DRY_RUN = False
         upt.supabase = fake
         upt.release_capital = lambda tid, size, pnl: released.append((tid, size, pnl))
         upt.update_trade_memory_outcome = lambda *a, **k: 0
+        upt._tg_send = lambda *a, **k: None  # U-9 close alert: load_dotenv leaks real creds
         ret = upt._close_trade(dict(TRADE), "TARGET_HIT", 105.0, 5, NOW)
     finally:
-        upt.DRY_RUN, upt.supabase, upt.release_capital, upt.update_trade_memory_outcome = orig
+        (upt.DRY_RUN, upt.supabase, upt.release_capital,
+         upt.update_trade_memory_outcome, upt._tg_send) = orig
     return ret, fake, released
 
 

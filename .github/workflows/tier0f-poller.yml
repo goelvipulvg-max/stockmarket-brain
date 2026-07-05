@@ -1,5 +1,13 @@
 name: Tier-0F Poller
 
+# P-1: 2-min cron-job.org dispatches + 10-min GH fallback can overlap; two
+# concurrent runs could both read the same unpicked row before either marks it
+# (mark-before-dispatch P2-14 only guards WITHIN a run) => double dispatch.
+# Serialize runs; a queued run rescans everything unpicked, so nothing is lost.
+concurrency:
+  group: tier0f-poller-run
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:  # Primary trigger via cron-job.org webhook (every 2 min)
   schedule:
