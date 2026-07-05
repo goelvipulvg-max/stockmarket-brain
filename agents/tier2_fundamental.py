@@ -10,7 +10,9 @@ Production trigger comes from Tier-0F poller (Phase 5 Batch B).
 import os
 import json
 import argparse
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -62,6 +64,7 @@ CONFIDENCE_CEILING = 85
 AGREEMENT_THRESHOLD = 70
 AVG_CONFIDENCE_FLOOR = 65
 HORIZON_TO_DAYS = {"SHORT": 3, "MEDIUM": 10, "LONG": 30}
+IST = ZoneInfo("Asia/Kolkata")  # closed_at convention matches update_paper_trades
 
 # Test-mode bypass for stage 4 (NIFTY mood) -- production must NEVER set this.
 TIER2F_TEST_MODE = os.getenv("TIER2F_TEST_MODE", "false").lower() == "true"
@@ -552,8 +555,13 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
             return {"skip": "duplicate_ticker_today_for_source"}
         raise
 
-    # --- Deploy capital ---
-    deploy_capital(trade_id, size_rs)
+    # --- Deploy capital (seam-a guard: VOID the trade if the deploy fails, else
+    # it survives as a phantom OPEN row whose cash was never deducted) ---
+    try:
+        deploy_capital(trade_id, size_rs)
+    except Exception as deploy_err:
+        _void_failed_deploy(trade_id, symbol, deploy_err)
+        raise
     print(f"[STAGE 10: insert] trade_id={trade_id}, size_rs={size_rs}, deployed")
 
     # --- Phase 7 §9.1: capture LIVE_TRADE row to trade_memory_v2 (SUPABASE) ---
@@ -623,6 +631,36 @@ def _tg_send(message: str) -> None:
         )
     except Exception as e:
         print(f"[_tg_send] Telegram send failed: {e} -- continuing (trade already recorded)")
+
+
+def _void_failed_deploy(trade_id: int, symbol: str, err: Exception) -> None:
+    """Seam-a guard (Batch D-2): deploy_capital failed AFTER the paper_trades
+    insert committed. Left alone, the row survives as a phantom OPEN trade --
+    no cash was deducted, yet the updater would eventually close it and
+    release_capital would mint money (audit Exec #2). VOID is terminal and
+    invisible to every consumer (updater/guardian/tier3 scan status=OPEN;
+    stats use explicit resolved lists). Requires 'VOID' in the paper_trades
+    status CHECK constraint (sql/batchD2_seam_guards.sql); if the UPDATE is
+    rejected, we fall to the CRITICAL alert -- the phantom then needs a manual
+    fix, and the v2 release-RPC DEPLOY_MISSING guard still blocks the mint."""
+    try:
+        sb.table("paper_trades").update({
+            "status": "VOID",
+            "closed_at": datetime.now(IST).isoformat(),
+        }).eq("id", trade_id).eq("status", "OPEN").execute()
+        print(f"[STAGE 10: deploy-FAILED] trade {trade_id} VOIDED (no capital deducted): {err}")
+        _tg_send(
+            f"⚠️ TIER2F: deploy_capital FAILED for {symbol} (trade {trade_id}) -- "
+            f"trade VOIDED, no capital was deducted.\nError: {err}"
+        )
+    except Exception as void_err:
+        print(f"[STAGE 10: deploy-FAILED] CRITICAL: could not VOID trade {trade_id}: "
+              f"{void_err} (original deploy error: {err})")
+        _tg_send(
+            f"🚨 TIER2F CRITICAL: deploy failed for {symbol} (trade {trade_id}) AND "
+            f"void failed -- PHANTOM OPEN TRADE, manual fix needed.\n"
+            f"Deploy err: {err}\nVoid err: {void_err}"
+        )
 
 
 def _insert_disagreement(filing, haiku, flash, reason) -> int:

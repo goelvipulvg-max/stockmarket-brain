@@ -167,7 +167,14 @@ def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
             return None
         # Phase 2: release capital on close (D3: skip NULL-quantity trades)
         if qty is not None:
-            release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+            try:
+                release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+            except Exception as rel_err:
+                # Seam-c guard (Batch D-2): the status flip above is already
+                # committed, so without this the capital would leak forever (no
+                # future run rescans a non-OPEN trade) and the raise would abort
+                # the rest of this run's trades. Mark for retry and continue.
+                _mark_release_failed(trade, rel_err)
         else:
             print(f"  {trade['ticker']}: pre-Phase-2 trade (no quantity), skipping ledger")
     # Phase 7 §9.2: backfill outcome onto the LIVE_TRADE row (SUPABASE, non-fatal)
@@ -184,6 +191,81 @@ def _close_expired(trade, exit_price, holding_days, now_ist):
     another run already closed the trade.
     """
     return _close_trade(trade, "EXPIRED", exit_price, holding_days, now_ist)
+
+
+def _mark_release_failed(trade, err):
+    """Seam-c guard: release_capital failed AFTER the close committed. Flag the
+    row so _retry_failed_releases() heals it on a future run. Degrades
+    gracefully while the capital_release_failed column is absent
+    (sql/batchD2_seam_guards.sql): the flag write fails -> CRITICAL log, and
+    the leak needs manual reconciliation via capital_ledger."""
+    print(f"  {trade['ticker']}: CAPITAL RELEASE FAILED for closed trade "
+          f"id={trade['id']}: {err} -- marking for retry")
+    try:
+        supabase.table("paper_trades").update({"capital_release_failed": True})\
+            .eq("id", trade["id"]).execute()
+    except Exception as mark_err:
+        print(f"  {trade['ticker']}: CRITICAL -- could not set "
+              f"capital_release_failed on id={trade['id']}: {mark_err}. "
+              f"Rs.{trade.get('position_size_rs')} stuck in capital_deployed; "
+              f"manual reconciliation needed (release err: {err})")
+
+
+def _release_already_done(trade_id):
+    """True when capital_ledger already holds a PNL_REALIZED row for this trade.
+    Python-side twin of the v2 RPC's ALREADY_RELEASED guard -- covers the
+    window before the owner applies the v2 SQL."""
+    rows = supabase.table("capital_ledger").select("id")\
+        .eq("paper_trade_id", trade_id).eq("txn_type", "PNL_REALIZED")\
+        .limit(1).execute().data
+    return bool(rows)
+
+
+def _retry_failed_releases():
+    """Heal seam-c leaks: retry release_capital for rows flagged
+    capital_release_failed=true (their close already committed; only the
+    money move failed).
+
+    Exactly-once safety: the v2 release RPC refuses a second release
+    (ALREADY_RELEASED), and _release_already_done() covers the pre-v2-SQL
+    window. Worst case after a success whose flag-clear failed: the next
+    retry sees ALREADY_RELEASED and just clears the flag -- never a double
+    credit. One bad row never aborts the others (per-trade catch). Skipped
+    in DRY_RUN; degrades gracefully while the column is absent (scan errors
+    -> log + return)."""
+    if DRY_RUN:
+        return
+    try:
+        flagged = supabase.table("paper_trades").select("*")\
+            .eq("capital_release_failed", True).execute().data
+    except Exception as e:
+        print(f"Release-retry scan skipped (capital_release_failed column absent?): {e}")
+        return
+    if not flagged:
+        return
+    print(f"Retrying {len(flagged)} failed capital release(s)...")
+    for trade in flagged:
+        tid = trade["id"]
+        try:
+            if _release_already_done(tid):
+                print(f"  id={tid} {trade['ticker']}: ledger already has PNL_REALIZED -- clearing flag")
+            else:
+                qty = trade.get("quantity")
+                pnl_rs = trade.get("pnl_rs")
+                if qty is None or pnl_rs is None:
+                    print(f"  id={tid} {trade['ticker']}: missing quantity/pnl_rs -- cannot retry, manual fix")
+                    continue
+                try:
+                    release_capital(tid, float(trade["position_size_rs"]), pnl_rs)
+                    print(f"  id={tid} {trade['ticker']}: release retried OK -- clearing flag")
+                except RuntimeError as e:
+                    if "ALREADY_RELEASED" not in str(e):
+                        raise
+                    print(f"  id={tid} {trade['ticker']}: RPC says already released -- clearing flag")
+            supabase.table("paper_trades").update({"capital_release_failed": False})\
+                .eq("id", tid).execute()
+        except Exception as e:
+            print(f"  id={tid} {trade['ticker']}: retry failed, keeping flag: {e}")
 
 
 def _compute_t1_upgrade(entry, direction, segment):
@@ -231,6 +313,9 @@ def main():
     if DRY_RUN:
         print("*** DRY-RUN MODE — no DB writes ***")
     print(f"Run @ {now_ist.strftime('%Y-%m-%d %H:%M IST')} | Market close window: {is_market_close}")
+
+    # Seam-c healing: retry any capital releases that failed on a prior run
+    _retry_failed_releases()
 
     open_trades = supabase.table("paper_trades")\
         .select("*").eq("status", "OPEN").execute().data

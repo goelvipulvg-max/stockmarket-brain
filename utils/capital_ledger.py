@@ -49,8 +49,11 @@ def deploy_capital(paper_trade_id, amount_rs):
 def release_capital(paper_trade_id, position_size_rs, pnl_rs):
     """Return deployed capital + realised P&L to cash. Called on trade close.
 
-    P0-1: single atomic RPC (see deploy_capital). Raises RuntimeError only if
-    the portfolio row is missing — the old code had no guards here.
+    P0-1: single atomic RPC (see deploy_capital). v2 RPC (Batch D-2 seam-b)
+    returns error_code on guard failures -- ALREADY_RELEASED / DEPLOY_MISSING /
+    INSUFFICIENT_DEPLOYED / NO_PORTFOLIO. The code is prefixed as "[CODE] msg"
+    in the raised RuntimeError so callers (updater retry) can string-match it;
+    a v1 RPC without error_code degrades to the bare message.
     """
     result = sb.rpc("release_capital_atomic", {
         "p_paper_trade_id": paper_trade_id,
@@ -59,5 +62,7 @@ def release_capital(paper_trade_id, position_size_rs, pnl_rs):
     }).execute()
     data = result.data
     if not data or not data.get("success"):
-        raise RuntimeError((data or {}).get("error") or "release_capital_atomic failed")
+        code = (data or {}).get("error_code")
+        msg = (data or {}).get("error") or "release_capital_atomic failed"
+        raise RuntimeError(f"[{code}] {msg}" if code else msg)
     return data

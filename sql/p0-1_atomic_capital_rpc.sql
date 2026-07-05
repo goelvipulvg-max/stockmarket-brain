@@ -1,5 +1,13 @@
--- P0-1: Atomic capital ledger operations (applied 2026-07-04 by owner via
--- Supabase Dashboard > SQL Editor).
+-- P0-1: Atomic capital ledger operations.
+--   v1 applied 2026-07-04 by owner via Supabase Dashboard > SQL Editor.
+--   v2 (Batch D Session 2, seam-b): release_capital_atomic gains guards --
+--   ALREADY_RELEASED (release-once) / DEPLOY_MISSING (no deploy row) /
+--   INSUFFICIENT_DEPLOYED (deployed floor) + open_positions floored at 0,
+--   and an error_code field in failure returns.
+--   STATUS: v2 NOT YET APPLIED to the live DB -- owner must re-run the
+--   release_capital_atomic function below in Supabase Dashboard before resume.
+--   Companion schema changes (VOID status, capital_release_failed column):
+--   sql/batchD2_seam_guards.sql.
 --
 -- Both functions lock the live (latest-by-id) portfolio row FOR UPDATE, so
 -- concurrent deploy/release calls serialize inside Postgres -- no lost
@@ -7,8 +15,8 @@
 -- with ROUND(x, 2) => no float drift (also fixes P3-11-iii).
 --
 -- Callers: utils/capital_ledger.py deploy_capital() / release_capital()
--- via supabase.rpc(). Return contract: JSONB {success, error?, cash_after,
--- deployed_after, realized_after?, equity_after}.
+-- via supabase.rpc(). Return contract: JSONB {success, error_code?, error?,
+-- cash_after, deployed_after, realized_after?, equity_after}.
 
 CREATE OR REPLACE FUNCTION deploy_capital_atomic(
     p_paper_trade_id BIGINT,
@@ -71,7 +79,40 @@ BEGIN
     SELECT * INTO v_pf FROM portfolio ORDER BY id DESC LIMIT 1 FOR UPDATE;
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false,
+            'error_code', 'NO_PORTFOLIO',
             'error', 'Portfolio not initialized (no rows)');
+    END IF;
+
+    -- Guard 1 (release-once): PNL_REALIZED row already exists => capital already
+    -- returned; releasing again would MINT cash. EXISTS runs behind the portfolio
+    -- row lock above, so concurrent releases serialize correctly.
+    IF p_paper_trade_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM capital_ledger
+        WHERE paper_trade_id = p_paper_trade_id AND txn_type = 'PNL_REALIZED'
+    ) THEN
+        RETURN jsonb_build_object('success', false,
+            'error_code', 'ALREADY_RELEASED',
+            'error', format('Trade %s already has a PNL_REALIZED ledger row', p_paper_trade_id));
+    END IF;
+
+    -- Guard 2 (deploy-must-exist): releasing capital that was never deployed
+    -- (phantom trade) would MINT cash.
+    IF p_paper_trade_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM capital_ledger
+        WHERE paper_trade_id = p_paper_trade_id AND txn_type = 'DEPLOY'
+    ) THEN
+        RETURN jsonb_build_object('success', false,
+            'error_code', 'DEPLOY_MISSING',
+            'error', format('No DEPLOY ledger row for trade %s -- refusing to release', p_paper_trade_id));
+    END IF;
+
+    -- Guard 3 (deployed floor): mirror of deploy's insufficient-cash guard.
+    IF p_position_size_rs > v_pf.capital_deployed THEN
+        RETURN jsonb_build_object('success', false,
+            'error_code', 'INSUFFICIENT_DEPLOYED',
+            'error', format('Release Rs.%s exceeds capital_deployed Rs.%s',
+                            to_char(p_position_size_rs, 'FM999,999,999,990.00'),
+                            to_char(v_pf.capital_deployed, 'FM999,999,999,990.00')));
     END IF;
 
     v_returned     := ROUND(p_position_size_rs + p_pnl_rs, 2);
@@ -89,7 +130,7 @@ BEGIN
         capital_deployed = v_new_deployed,
         total_equity     = ROUND(v_new_cash + v_new_deployed, 2),  -- D4: no MTM
         realized_pnl_rs  = v_new_realized,
-        open_positions   = v_pf.open_positions - 1,
+        open_positions   = GREATEST(v_pf.open_positions - 1, 0),  -- floor at 0
         updated_at       = NOW()
     WHERE id = v_pf.id;
 
