@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from utils.supabase_client import get_client
 from utils.capital_ledger import release_capital
 from utils.trade_memory_writer import update_trade_memory_outcome
+from utils.trade_costs import compute_trade_costs
 from curl_cffi import requests as curl_requests
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -69,6 +70,32 @@ def should_force_expire(holding_days, row_max_holding_days, is_market_close,
     return is_market_close and holding_days >= max_hold
 
 
+def first_touch(bars, target, sl, direction):
+    """Which level did intraday price touch FIRST -- 'TARGET' or 'SL'?
+
+    P1-3 pessimistic policy: only consulted when BOTH levels were touched
+    today (caller guards that), so every unresolvable case resolves to 'SL':
+    same-bar double-touch => 'SL'; bars missing/empty/unusable => 'SL';
+    neither level found in bars (daily-hi/lo vs series disagreement) => 'SL'.
+    bars = chronological [(high, low), ...] 1m tuples from get_market_data.
+    Pure -- no I/O.
+    """
+    if not bars:
+        return "SL"
+    for hi_b, lo_b in bars:
+        if direction == "BUY":
+            s_hit = lo_b <= sl
+            t_hit = hi_b >= target
+        else:  # SELL
+            s_hit = hi_b >= sl
+            t_hit = lo_b <= target
+        if s_hit:
+            return "SL"          # SL alone OR same-bar tie -> pessimistic
+        if t_hit:
+            return "TARGET"
+    return "SL"
+
+
 try:
     supabase = get_client()
 except ValueError as e:
@@ -99,11 +126,24 @@ def get_market_data(ticker):
                     day_open = float(opens[0])
         except Exception:
             day_open = float(meta.get("chartPreviousClose", ltp))
+        # P1-3: the 1m series is already in this response -- extract chronological
+        # (high, low) bars so hit detection can order same-day target-vs-SL
+        # touches. None/[] when unusable; consumers must treat that as no-data.
+        bars = None
+        try:
+            q0 = result.get("indicators", {}).get("quote", [])
+            if q0:
+                bars = [(float(h), float(l))
+                        for h, l in zip(q0[0].get("high") or [], q0[0].get("low") or [])
+                        if h is not None and l is not None]
+        except Exception:
+            bars = None
         return {
             "ltp": round(ltp, 2),
             "day_high": round(float(meta.get("regularMarketDayHigh", ltp)), 2),
             "day_low": round(float(meta.get("regularMarketDayLow", ltp)), 2),
             "day_open": round(day_open, 2),
+            "bars": bars,
         }
     except Exception as e:
         print(f"  Fetch failed for {ticker}: {type(e).__name__}: {e}")
@@ -126,6 +166,20 @@ def compute_pnl_rs(pnl_pct, entry, qty):
     if qty is None:
         return None
     return round((pnl_pct / 100.0) * entry * qty, 2)
+
+
+def _trade_cost_rs(entry, exit_price, qty):
+    """Exact delivery round-trip cost (Rs) for a closed trade, or None when
+    not computable (legacy qty-None rows / invalid inputs). Deterministic from
+    entry/exit/qty -- the close path and the release-retry path MUST both use
+    this so a retried release nets the same amount as a direct one. Thin
+    wrapper over utils.trade_costs.compute_trade_costs (pure, never raises).
+    FNO caveat: the model is equity-DELIVERY; no qty-bearing FNO rows are
+    generated today (TIER2F is equity-only)."""
+    if qty is None:
+        return None
+    tc = compute_trade_costs(entry, exit_price, qty)
+    return round(tc["total_cost_rs"], 2) if tc["valid"] else None
 
 
 def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
@@ -165,10 +219,24 @@ def _close_trade(trade, new_status, exit_price, holding_days, now_ist,
             print(f"  {trade['ticker']}: already closed by another run -- "
                   f"skipping capital release (id={trade['id']})")
             return None
+        # Fidelity (iii): exact round-trip cost at close. Stored best-effort on
+        # the row (cost_rs -- sql/batchD2_seam_guards.sql section 4); the LEDGER
+        # gets NET pnl so portfolio cash/equity/realized stop overstating live.
+        # Row pnl_rs stays GROSS: expectancy.py recomputes costs itself from
+        # entry/exit/qty, so a net pnl_rs there would double-count.
+        cost_rs = _trade_cost_rs(entry, exit_price, qty)
+        if cost_rs is not None:
+            try:
+                supabase.table("paper_trades").update({"cost_rs": cost_rs})\
+                    .eq("id", trade["id"]).execute()
+            except Exception as cost_err:
+                print(f"  {trade['ticker']}: cost_rs store skipped "
+                      f"(column absent?): {cost_err}")
         # Phase 2: release capital on close (D3: skip NULL-quantity trades)
         if qty is not None:
+            net_pnl_rs = pnl_rs if cost_rs is None else round(pnl_rs - cost_rs, 2)
             try:
-                release_capital(trade["id"], float(trade["position_size_rs"]), pnl_rs)
+                release_capital(trade["id"], float(trade["position_size_rs"]), net_pnl_rs)
             except Exception as rel_err:
                 # Seam-c guard (Batch D-2): the status flip above is already
                 # committed, so without this the capital would leak forever (no
@@ -255,8 +323,13 @@ def _retry_failed_releases():
                 if qty is None or pnl_rs is None:
                     print(f"  id={tid} {trade['ticker']}: missing quantity/pnl_rs -- cannot retry, manual fix")
                     continue
+                # Fidelity (iii): net the retried release exactly like a direct
+                # close would (row pnl_rs is GROSS; cost is deterministic from
+                # the row's entry/exit/qty).
+                cost_rs = _trade_cost_rs(trade.get("entry_price"), trade.get("exit_price"), qty)
+                net_pnl_rs = pnl_rs if cost_rs is None else round(float(pnl_rs) - cost_rs, 2)
                 try:
-                    release_capital(tid, float(trade["position_size_rs"]), pnl_rs)
+                    release_capital(tid, float(trade["position_size_rs"]), net_pnl_rs)
                     print(f"  id={tid} {trade['ticker']}: release retried OK -- clearing flag")
                 except RuntimeError as e:
                     if "ALREADY_RELEASED" not in str(e):
@@ -423,6 +496,21 @@ def main():
         elif direction == "SELL" and lo <= active_target:
             new_status = "TARGET_HIT"
 
+        # ── P1-3: target AND SL both touched today -> daily hi/lo can't order
+        # them (gap-crash-then-rebound booked TARGET_HIT before this). Consult
+        # the 1m bars; first_touch resolves every unresolvable case to SL
+        # (pessimistic). Day-0 is LTP-only (hi == lo), so both-touched is
+        # impossible there -- the is_day0 guard also keeps full-day bars from
+        # ever leaking into day-0 checks (HOTFIX-2 look-ahead). ──
+        if new_status == "TARGET_HIT" and not is_day0:
+            sl_touched = (lo <= active_sl) if direction == "BUY" else (hi >= active_sl)
+            if sl_touched:
+                seq = first_touch(market.get("bars"), active_target, active_sl, direction)
+                if seq == "SL":
+                    new_status = None  # fall through to the SL branch below
+                print(f"  {ticker}: AMBIGUOUS day (target+SL both touched) -- "
+                      f"1m sequence says {seq} first (P1-3)")
+
         # SL check with gap protection (HOTFIX-2: hi/lo are LTP-only on day-0)
         if not new_status:
             if direction == "BUY" and lo <= active_sl:
@@ -440,6 +528,9 @@ def main():
                     continue
                 elif lo <= wait_floor:
                     new_status = "SL_HIT"
+                    # Fidelity (ii): price cleared the whole WAIT zone -- book the
+                    # breached boundary, not active_sl (which price left behind).
+                    gap_exit_price = wait_floor
 
             elif direction == "SELL" and hi >= active_sl:
                 mandatory_ceiling = round(entry * GAP_MANDATORY_CEILING, 2)
@@ -453,6 +544,8 @@ def main():
                     continue
                 elif hi >= wait_ceiling:
                     new_status = "SL_HIT"
+                    # Fidelity (ii): symmetric boundary fill for SELL.
+                    gap_exit_price = wait_ceiling
 
         # ── Expiry (time-stop) — decision hoisted to must_expire above (HOTFIX-1) ──
         if not new_status and must_expire:

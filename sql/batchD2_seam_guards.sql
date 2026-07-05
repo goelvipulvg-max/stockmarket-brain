@@ -51,3 +51,22 @@ ALTER TABLE paper_trades
 -- WHERE pt.status = 'OPEN' AND pt.quantity IS NOT NULL
 --   AND NOT EXISTS (SELECT 1 FROM capital_ledger cl
 --                   WHERE cl.paper_trade_id = pt.id AND cl.txn_type = 'DEPLOY');
+
+-- ============================================================
+-- 4) Fidelity (iii): exact round-trip cost stored per closed trade.
+--    _close_trade computes it via utils/trade_costs.compute_trade_costs and
+--    stores it best-effort; the capital ledger releases NET (gross - cost).
+--    Code degrades gracefully while this column is absent (cost_rs store is
+--    skipped with a log line; the NET release still happens -- cost is
+--    deterministic from entry/exit/qty, not read from this column).
+--
+--    !! NOTE (2026-07-05): sections 1-2 upar wale OWNER NE ALREADY APPLY
+--    kar diye hain (VOID constraint + capital_release_failed). Sirf YEH
+--    ek ALTER alag se run karna hai -- poori file dobara nahi.
+-- ============================================================
+ALTER TABLE paper_trades
+  ADD COLUMN IF NOT EXISTS cost_rs NUMERIC;
+
+-- 4a) Post-apply verification:
+-- SELECT column_name, data_type FROM information_schema.columns
+-- WHERE table_name = 'paper_trades' AND column_name = 'cost_rs';
