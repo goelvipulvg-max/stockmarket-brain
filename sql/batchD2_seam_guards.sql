@@ -1,7 +1,8 @@
 -- Batch D Session 2 -- money-seam schema changes (audit Exec #2, reco #3).
--- OWNER RUNS MANUALLY in Supabase Dashboard > SQL Editor. The agent never
--- touches the DB. Run BEFORE resuming the system, together with the v2
--- release_capital_atomic in sql/p0-1_atomic_capital_rpc.sql.
+-- STATUS: ALL sections (1, 2, 4) APPLIED by owner 2026-07-05 in Supabase
+-- Dashboard > SQL Editor, together with the v2 release_capital_atomic in
+-- sql/p0-1_atomic_capital_rpc.sql (confirmed). The agent never touches the
+-- DB. File kept as reference + post-apply verification queries.
 
 -- ============================================================
 -- 1) Seam (a): allow the 'VOID' terminal status (deploy-failed trades).
@@ -60,9 +61,8 @@ ALTER TABLE paper_trades
 --    skipped with a log line; the NET release still happens -- cost is
 --    deterministic from entry/exit/qty, not read from this column).
 --
---    !! NOTE (2026-07-05): sections 1-2 upar wale OWNER NE ALREADY APPLY
---    kar diye hain (VOID constraint + capital_release_failed). Sirf YEH
---    ek ALTER alag se run karna hai -- poori file dobara nahi.
+--    !! NOTE (2026-07-05, updated same day): yeh cost_rs ALTER bhi OWNER NE
+--    APPLY kar diya hai -- ab is file ka HAR section live DB mein hai.
 -- ============================================================
 ALTER TABLE paper_trades
   ADD COLUMN IF NOT EXISTS cost_rs NUMERIC;

@@ -4,8 +4,9 @@
 --   ALREADY_RELEASED (release-once) / DEPLOY_MISSING (no deploy row) /
 --   INSUFFICIENT_DEPLOYED (deployed floor) + open_positions floored at 0,
 --   and an error_code field in failure returns.
---   STATUS: v2 NOT YET APPLIED to the live DB -- owner must re-run the
---   release_capital_atomic function below in Supabase Dashboard before resume.
+--   STATUS: v2 APPLIED to the live DB by owner 2026-07-05 (Supabase
+--   Dashboard > SQL Editor, confirmed). File kept as the source-of-truth
+--   definition of the deployed functions.
 --   Companion schema changes (VOID status, capital_release_failed column):
 --   sql/batchD2_seam_guards.sql.
 --
