@@ -10,7 +10,7 @@ Production trigger comes from Tier-0F poller (Phase 5 Batch B).
 import os
 import json
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -185,6 +185,22 @@ def process_filing(filing_id: int, dry_run: bool = False) -> dict:
         return {"skip": "filing_not_found", "filing_id": filing_id}
     filing = filing_rows[0]
     symbol = filing["symbol"]
+
+    # --- Step 0: claim the filing (C-b eviction fix; supersedes poller-side P2-14) ---
+    # The poller dispatches WITHOUT marking; this atomic check-and-set is the only
+    # place a filing is consumed. A run evicted from the tier2f-capital pending
+    # slot never executes -> never claims -> the poller re-selects it next cycle.
+    # A duplicate dispatch claims 0 rows and exits here (runs are serialized by
+    # the concurrency group). A claim exception aborts BEFORE any analysis,
+    # preserving the P2-14 invariant: no analysis without a successful mark.
+    if not dry_run:
+        claimed = sb.table("filings_log").update({
+            "picked_by_tier0f": True,
+            "picked_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", filing_id).eq("picked_by_tier0f", False).execute().data
+        print(f"[STAGE 0: claim] filing_id={filing_id}, claimed={bool(claimed)}")
+        if not claimed:
+            return {"skip": "already_claimed", "filing_id": filing_id}
 
     # --- Step 1: F&O ban check ---
     banned = is_in_ban(symbol)

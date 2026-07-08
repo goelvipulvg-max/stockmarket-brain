@@ -113,37 +113,6 @@ def _dispatch_tier2f(filing_id: int) -> bool:
         return False
 
 
-def _mark_picked(filing_id: int) -> bool:
-    """Marks filing as picked_by_tier0f=true and picked_at=NOW().
-    Returns True on success."""
-    sb = get_client()
-    try:
-        sb.table('filings_log').update({
-            'picked_by_tier0f': True,
-            'picked_at': datetime.now(timezone.utc).isoformat(),
-        }).eq('id', filing_id).execute()
-        return True
-    except Exception as e:
-        log.error(f"Mark picked failed for filing_id={filing_id}: {e}")
-        return False
-
-
-def _unmark_picked(filing_id: int) -> bool:
-    """Compensating rollback of _mark_picked -- resets picked_by_tier0f=false and
-    clears picked_at so a dispatch-failed filing retries next cycle instead of
-    being silently dropped. Returns True on success."""
-    sb = get_client()
-    try:
-        sb.table('filings_log').update({
-            'picked_by_tier0f': False,
-            'picked_at': None,
-        }).eq('id', filing_id).execute()
-        return True
-    except Exception as e:
-        log.error(f"Unmark failed for filing_id={filing_id}: {e}")
-        return False
-
-
 def main(dry_run: bool = False) -> int:
     """Main poller entry point. Returns exit code (0 success, 1 partial failure)."""
     log.info(f"Tier-0F poller starting (dry_run={dry_run})")
@@ -167,24 +136,19 @@ def main(dry_run: bool = False) -> int:
             success_count += 1
             continue
 
-        # P2-14: mark BEFORE dispatch so a mark failure can never trigger a
-        # re-dispatch (duplicate trade). If the mark fails, skip dispatch -- the
-        # row stays unpicked and retries cleanly next cycle (nothing dispatched).
-        if not _mark_picked(fid):
-            fail_count += 1
-            log.warning(f"Mark failed, skipped dispatch for filing_id={fid} (retries next cycle)")
-            continue
-
+        # C-b eviction fix (supersedes P2-14 mark-before-dispatch): the poller no
+        # longer marks picked_by_tier0f -- the Tier-2F run claims the filing itself
+        # (atomic UPDATE WHERE picked_by_tier0f=false, top of process_filing). An
+        # evicted pending run never claims, so the filing re-appears next cycle
+        # (lossless). A failed dispatch needs no rollback -- nothing was marked.
+        # Re-dispatch of a still-unclaimed filing evicts its own predecessor in
+        # the tier2f-capital group; duplicate trades stay blocked by the
+        # uniq_paper_trades_ticker_date_source constraint.
         if _dispatch_tier2f(fid):
             success_count += 1
         else:
-            # Dispatch definitively failed (non-204 / exception => workflow NOT
-            # triggered). Roll back the optimistic mark so the row retries next
-            # cycle rather than being silently dropped (invisible to the
-            # health_monitor picked_by_tier0f=false backlog check).
-            _unmark_picked(fid)
             fail_count += 1
-            log.error(f"Dispatch failed after mark; rolled back pick for filing_id={fid}")
+            log.error(f"Dispatch failed for filing_id={fid} (stays unpicked, retries next cycle)")
 
     log.info(f"Poller complete: {success_count} success, {fail_count} failed")
     return 0 if fail_count == 0 else 1

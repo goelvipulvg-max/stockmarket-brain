@@ -21,8 +21,9 @@ from agents.tier3_position_manager import apply_rules
 # V5.1 -- Tier-0F poller dry-run
 # ============================================================
 
-def test_V5_1_tier0f_poller_dispatches_and_marks_picked(monkeypatch):
-    """Mock dispatch, insert 2 test filings, run poller, verify dispatched + marked."""
+def test_V5_1_tier0f_poller_dispatches_without_marking(monkeypatch):
+    """C-b: mock dispatch, insert 2 test filings, run poller, verify dispatched
+    but NOT marked -- claiming moved to the Tier-2F run itself."""
     sb = get_sb()
 
     # Mock dispatch to avoid real GitHub API call
@@ -31,6 +32,9 @@ def test_V5_1_tier0f_poller_dispatches_and_marks_picked(monkeypatch):
         dispatch_calls.append(filing_id)
         return True
     monkeypatch.setattr(p_module, '_dispatch_tier2f', fake_dispatch)
+    # Change-1 (884947a) set BATCH_LIMIT=1; restore batch capacity so one poller
+    # pass can still cover both test rows (limit is read at query-build time).
+    monkeypatch.setattr(p_module, 'BATCH_LIMIT', 10)
 
     # Insert 2 test material filings using v3 column names
     test_ids = []
@@ -49,7 +53,7 @@ def test_V5_1_tier0f_poller_dispatches_and_marks_picked(monkeypatch):
             }).execute()
             test_ids.append(r.data[0]['id'])
 
-        # Run poller (non-dry-run -- dispatch is mocked, mark_picked runs real DB update)
+        # Run poller (non-dry-run -- dispatch is mocked; C-b: poller does NO DB write)
         exit_code = tier0f_main(dry_run=False)
 
         # Verify
@@ -58,14 +62,14 @@ def test_V5_1_tier0f_poller_dispatches_and_marks_picked(monkeypatch):
         assert all(tid in dispatch_calls for tid in test_ids), \
             f"All test filing IDs should be dispatched. Got: {dispatch_calls}"
 
-        # Verify DB marked picked_by_tier0f=true
+        # C-b: the poller must NOT consume the filings -- claiming is Tier-2F's job
         check = sb.table('filings_log').select('id, picked_by_tier0f, picked_at')\
             .in_('id', test_ids).execute()
         for row in check.data:
-            assert row['picked_by_tier0f'] is True, \
-                f"Filing {row['id']} not marked picked_by_tier0f"
-            assert row['picked_at'] is not None, \
-                f"Filing {row['id']} missing picked_at timestamp"
+            assert row['picked_by_tier0f'] is False, \
+                f"C-b: poller must NOT mark filing {row['id']} -- claiming is Tier-2F's job"
+            assert row['picked_at'] is None, \
+                f"C-b: poller must NOT set picked_at on filing {row['id']}"
 
     finally:
         # Cleanup
@@ -129,53 +133,67 @@ def test_V5_7b_tier3_allows_different_source_same_ticker():
 
 
 # ============================================================
-# P2-14 -- mark-before-dispatch ordering + rollback (race fix)
+# C-b -- claim moved from poller to Tier-2F (eviction fix; supersedes P2-14)
 # ============================================================
 
-def test_P2_14_mark_failure_skips_dispatch(monkeypatch):
-    """If _mark_picked fails, _dispatch_tier2f must NOT run (no duplicate re-dispatch).
+def test_Cb_poller_has_no_marking_helpers():
+    """Pins the C-b deletion: the poller must not own any marking code."""
+    assert not hasattr(p_module, '_mark_picked')
+    assert not hasattr(p_module, '_unmark_picked')
 
-    Regression for P2-14: pre-fix the poller dispatched BEFORE marking, so a mark
-    failure left the filing unpicked and it re-dispatched next cycle (duplicate trade).
-    Mark-first means a mark failure short-circuits dispatch entirely.
-    """
-    dispatch_calls = []
-    def fake_dispatch(filing_id):
-        dispatch_calls.append(filing_id)
-        return True
 
+def test_Cb_dispatch_failure_leaves_filing_unpicked(monkeypatch):
+    """Failed dispatch: exit 1, and the poller touches NO DB in the loop."""
     monkeypatch.setattr(p_module, '_query_pending_filings',
-                        lambda: [{'id': 4201, 'symbol': 'P214A'}])
-    monkeypatch.setattr(p_module, '_mark_picked', lambda fid: False)
-    monkeypatch.setattr(p_module, '_dispatch_tier2f', fake_dispatch)
-
-    exit_code = tier0f_main(dry_run=False)
-
-    assert dispatch_calls == [], \
-        f"Dispatch must NOT fire when mark fails. Got: {dispatch_calls}"
-    assert exit_code == 1, "Poller should report partial failure (exit 1) on mark failure"
-
-
-def test_P2_14_dispatch_failure_rolls_back_mark(monkeypatch):
-    """If dispatch fails after a successful mark, _unmark_picked must roll it back.
-
-    Prevents a silent drop: a marked-but-undispatched filing is invisible to
-    health_monitor's picked_by_tier0f=false backlog check, so it must be un-marked
-    to retry next cycle.
-    """
-    unmark_calls = []
-    def fake_unmark(filing_id):
-        unmark_calls.append(filing_id)
-        return True
-
-    monkeypatch.setattr(p_module, '_query_pending_filings',
-                        lambda: [{'id': 4202, 'symbol': 'P214B'}])
-    monkeypatch.setattr(p_module, '_mark_picked', lambda fid: True)
+                        lambda: [{'id': 4301, 'symbol': 'CB1'}])
     monkeypatch.setattr(p_module, '_dispatch_tier2f', lambda fid: False)
-    monkeypatch.setattr(p_module, '_unmark_picked', fake_unmark)
+
+    class _BoobyTrapSB:
+        def table(self, name):
+            raise AssertionError("C-b: poller must not touch the DB during dispatch")
+    monkeypatch.setattr(p_module, 'get_client', lambda: _BoobyTrapSB())
 
     exit_code = tier0f_main(dry_run=False)
-
-    assert unmark_calls == [4202], \
-        f"Failed dispatch must roll back the mark. Got: {unmark_calls}"
     assert exit_code == 1, "Poller should report partial failure (exit 1) on dispatch failure"
+
+
+class _FakeFilingsTable:
+    """Serves the load (select) then the claim (update) chain in process_filing."""
+    def __init__(self, claim_result):
+        self._claim_result = claim_result
+        self._mode = None
+    def select(self, *_): self._mode = 'select'; return self
+    def update(self, _payload): self._mode = 'update'; return self
+    def eq(self, *_): return self
+    def execute(self):
+        class R: pass
+        r = R()
+        r.data = ([{'id': 4400, 'symbol': 'CBTEST'}] if self._mode == 'select'
+                  else self._claim_result)
+        return r
+
+
+class _FakeSB:
+    def __init__(self, claim_result): self._t = _FakeFilingsTable(claim_result)
+    def table(self, name):
+        assert name == 'filings_log'
+        return self._t
+
+
+def test_Cb_tier2f_skips_already_claimed(monkeypatch):
+    """Claim matches 0 rows (duplicate dispatch) -> exit before ANY analysis."""
+    from agents import tier2_fundamental as t2f
+    monkeypatch.setattr(t2f, 'sb', _FakeSB(claim_result=[]))
+    monkeypatch.setattr(t2f, 'is_in_ban',
+                        lambda s: (_ for _ in ()).throw(AssertionError('analysis ran past a failed claim')))
+    result = t2f.process_filing(4400)
+    assert result == {'skip': 'already_claimed', 'filing_id': 4400}
+
+
+def test_Cb_tier2f_claims_then_proceeds(monkeypatch):
+    """Successful claim -> pipeline continues (short-circuited at Stage 1)."""
+    from agents import tier2_fundamental as t2f
+    monkeypatch.setattr(t2f, 'sb', _FakeSB(claim_result=[{'id': 4400}]))
+    monkeypatch.setattr(t2f, 'is_in_ban', lambda s: True)
+    result = t2f.process_filing(4400)
+    assert result == {'skip': 'fno_ban', 'symbol': 'CBTEST'}
