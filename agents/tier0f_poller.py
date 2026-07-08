@@ -26,7 +26,7 @@ load_dotenv(override=True)
 GH_REPO = "goelvipulvg-max/stockmarket-brain"
 TIER2F_WORKFLOW = "tier2f.yml"
 LOOKBACK_MINUTES = 30
-BATCH_LIMIT = 10
+BATCH_LIMIT = 1
 MIN_SCORE = 6
 
 # Dormant confidence gate (reliability-gap B9). While USE_POLLER_CONFIDENCE_GATE
