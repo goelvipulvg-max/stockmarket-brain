@@ -32,6 +32,7 @@ _Compact ledger synthesized from all reports/ docs (reliability-gap report, gap1
 - **QuestDB wiring** — `questdb_client.py` configured, inactive → unblock: prioritization + server setup + ingestion
 - **Pinecone integration** — configured, not wired → unblock: embedding pipeline + index creation
 - **Windows scheduled task** (`StockMarketBrain_OneTimeAudit`) — ineffective (no stdout) → unblock: user decision to remove/reimplement with logging
+- **N-1 regression-pin test (mocked, config-only)** — designed but not shipped 2026-07-12 — scope-excluded from the N-1 fix session per rule 8. Revisit in a future test-hygiene batch.
 
 ## AVOID
 

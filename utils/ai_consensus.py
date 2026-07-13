@@ -18,6 +18,16 @@ from utils.json_extract import extract_json
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 
+# deepseek-v4-flash defaults to thinking mode and on Tier-2F-sized prompts burns
+# the whole completion budget on reasoning_content, returning content="" with
+# finish_reason="length" (17/21 verifier calls starved Jul 7-10 -- report
+# 2026-07-12 N-1). Disable thinking on every DeepSeek call, mirroring the Haiku
+# analyst's thinking={"type": "disabled"} below; keep a raised max_tokens as the
+# second belt so a silently-dropped param degrades to slow-but-alive instead of
+# re-starving (worst observed reasoning burn: 1,146 tokens).
+DEEPSEEK_MAX_TOKENS = 2500
+DEEPSEEK_NO_THINKING = {"thinking": {"type": "disabled"}}
+
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 
@@ -94,8 +104,9 @@ def run_verifier(context, analyst_output, prompt_template: str | None = None):
     def _call():
         response = deepseek_client.chat.completions.create(
             model=DEEPSEEK_MODEL,
-            max_tokens=600,
+            max_tokens=DEEPSEEK_MAX_TOKENS,
             temperature=0.3,
+            extra_body=DEEPSEEK_NO_THINKING,
             messages=[{"role": "user", "content": template.format(
                 context=context, analyst_output=json.dumps(analyst_output)
             )}],
@@ -114,8 +125,9 @@ def _run_deepseek_as_analyst(context, prompt_template=None):
     def _call():
         response = deepseek_client.chat.completions.create(
             model=DEEPSEEK_MODEL,
-            max_tokens=600,
+            max_tokens=DEEPSEEK_MAX_TOKENS,
             temperature=0.3,
+            extra_body=DEEPSEEK_NO_THINKING,
             messages=[{"role": "user", "content": template.format(context=context)}],
         )
         if response.choices and response.choices[0].message.content:
