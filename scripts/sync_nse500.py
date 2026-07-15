@@ -229,6 +229,13 @@ def backfill_company(conn, symbol):
 # ACTION HELPERS — DB writes (all respect DRY_RUN)
 # ═══════════════════════════════════════════════════════════════════════
 
+def _db_symbol(symbol):
+    """Neon watchlist/profiles rows store .NS-suffixed symbols; the sync
+    diffs bare symbols. Convert at the write seam (B1-a: bare writes were
+    no-ops against .NS rows -- GSPL stayed ACTIVE across 6 sync runs)."""
+    return symbol if symbol.endswith(".NS") else f"{symbol}.NS"
+
+
 def insert_new_watchlist(conn, symbol):
     if DRY_RUN:
         print(f"    [DRY-RUN] INSERT nse500_watchlist: {symbol}")
@@ -239,7 +246,7 @@ def insert_new_watchlist(conn, symbol):
            VALUES (%s, 'ACTIVE', %s)
            ON CONFLICT (symbol) DO UPDATE
            SET status = 'ACTIVE', added_date = %s""",
-        (symbol, date.today(), date.today()))
+        (_db_symbol(symbol), date.today(), date.today()))
     cur.close()
 
 
@@ -254,7 +261,7 @@ def ensure_company_profile(conn, symbol):
            VALUES (%s, %s, TRUE, NOW(), NOW())
            ON CONFLICT (symbol) DO UPDATE
            SET nifty500 = TRUE, updated_at = NOW()""",
-        (symbol, symbol))
+        (_db_symbol(symbol), symbol))
     cur.close()
 
 
@@ -267,14 +274,14 @@ def mark_inactive(conn, symbol):
         """UPDATE nse500_watchlist
            SET status = 'INACTIVE', removed_date = %s
            WHERE symbol = %s""",
-        (date.today(), symbol))
+        (date.today(), _db_symbol(symbol)))
     cur.close()
     cur = conn.cursor()
     cur.execute(
         """UPDATE company_profiles
            SET nifty500 = FALSE, updated_at = NOW()
            WHERE symbol = %s""",
-        (symbol,))
+        (_db_symbol(symbol),))
     cur.close()
 
 
@@ -287,14 +294,14 @@ def mark_active(conn, symbol):
         """UPDATE nse500_watchlist
            SET status = 'ACTIVE', removed_date = NULL
            WHERE symbol = %s""",
-        (symbol,))
+        (_db_symbol(symbol),))
     cur.close()
     cur = conn.cursor()
     cur.execute(
         """UPDATE company_profiles
            SET nifty500 = TRUE, updated_at = NOW()
            WHERE symbol = %s""",
-        (symbol,))
+        (_db_symbol(symbol),))
     cur.close()
 
 

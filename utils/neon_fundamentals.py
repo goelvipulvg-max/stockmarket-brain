@@ -14,13 +14,15 @@ def get_fundamentals(symbol: str) -> dict | None:
 
     Appends .NS to `symbol` before querying company_profiles.
     A bare symbol without .NS returns None — do not skip the suffix.
+    Only current index members pass: rows with nifty500 = FALSE (index
+    leavers, e.g. GSPL) return None (B1-a).
     """
     conn = get_neon_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT sector, market_cap, business_summary "
-                "FROM company_profiles WHERE symbol = %s LIMIT 1",
+                "FROM company_profiles WHERE symbol = %s AND nifty500 IS TRUE LIMIT 1",
                 (f"{symbol}.NS",),
             )
             row = cur.fetchone()
